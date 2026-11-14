@@ -15,12 +15,13 @@ import random
 import pygame
 
 from interfaz.tema import brillo
+from interfaz.colisiones_campamento import CENTRO_HOGUERA, LIMITE_NORTE
 
 
 class AmbienteRefugio:
     """Efectos de atmósfera del refugio: fuego, humo, luciérnagas, niebla y viñeta."""
 
-    def __init__(self, ancho, alto, fuego=(550, 478)):
+    def __init__(self, ancho, alto, fuego=CENTRO_HOGUERA):
         """
         Prepara las partículas y pinta una sola vez la niebla y la viñeta.
 
@@ -174,7 +175,8 @@ class AmbienteRefugio:
             l["x"] += math.cos(self.t * l["vel"] + l["fase"]) * 18 * dt
             l["y"] += math.sin(self.t * l["vel"] * 1.3 + l["fase"]) * 12 * dt
             l["x"] = min(self.ancho - 20, max(20, l["x"]))
-            l["y"] = min(self.alto - 50, max(180, l["y"]))
+            # Revolotean por todo el claro transitable (desde el límite norte hasta el HUD).
+            l["y"] = min(self.alto - 50, max(LIMITE_NORTE, l["y"]))
 
     # ---------------- dibujo (se llama en este orden desde el campamento) ----------------
     def dibujar_luz(self, surf):
