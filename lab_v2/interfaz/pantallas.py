@@ -47,6 +47,19 @@ from interfaz.tema import (ANCHO, ALTO, PANEL, BORDE, CIAN, ORO, ROJO, VERDE, MO
                            paleta_de, fuente, texto, texto_ajustado, panel, brillo, mezclar, vineta)
 from interfaz.widgets import (Boton, CampoTexto, icono_play, icono_pausa, icono_atras,
                               icono_inicio, icono_final)
+from interfaz.controlador_campamento import ControladorCampamento
+try:
+    from interfaz.colisiones_campamento import (
+        obtener_bloqueos_campamento,
+        obtener_limites_campamento,
+        es_posicion_valida,
+    )
+except ImportError:
+    from interfaz.controlador_campamento import (
+        obtener_bloqueos_campamento,
+        obtener_limites_campamento,
+        es_posicion_valida,
+    )
 
 MOVIMIENTOS = {
     pygame.K_UP: "arriba", pygame.K_w: "arriba",
@@ -469,31 +482,37 @@ class Campamento(Pantalla):
                 continue
             self.arboles.append((x, y, azar.randrange(22, 42), azar.randrange(0, 3)))
         self.porton = pygame.Rect(444, 86, 212, 194)
-        self.bloqueos = [self.porton.inflate(22, 18), pygame.Rect(95, 463, 162, 105),
-                         pygame.Rect(844, 414, 154, 100), pygame.Rect(826, 533, 143, 64),
-                         pygame.Rect(454, 432, 192, 97), pygame.Rect(176, 322, 178, 68),
-                         pygame.Rect(354, 427, 32, 30), pygame.Rect(719, 510, 32, 30),
-                         pygame.Rect(64, 568, 158, 65),
-                         pygame.Rect(286, 542, 32, 30)]
+        self.limites = obtener_limites_campamento()
+        self.bloqueos = obtener_bloqueos_campamento(self.porton)
+        self.controlador = ControladorCampamento(
+            posicion=self.personaje,
+            velocidad=self.VELOCIDAD,
+            limites=self.limites,
+            bloqueos=self.bloqueos,
+        )
+        self.teclas = self.controlador.teclas
 
     def evento(self, e):
         """Teclas del campamento: Esc/Retroceso vuelven al menú, E/Enter/Espacio interactúan, L alterna la antorcha y las flechas/WASD se anotan para mover. Recibe: e. Devuelve: nada."""
         if self.abriendo:
+            self.controlador.limpiar_teclas()
             return
         if e.type == pygame.KEYDOWN:
             if e.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
+                self.controlador.limpiar_teclas()
                 self.app.guardar_checkpoint(self.personaje)
                 self.app.ir_a(Menu(self.app))
+                return
             elif e.key in (pygame.K_e, pygame.K_RETURN, pygame.K_SPACE):
                 self._interactuar()
+                if self.abriendo:
+                    self.controlador.limpiar_teclas()
+                return
             elif e.key == pygame.K_l:
                 self.antorcha = not self.antorcha
                 self.app.antorcha_encendida = self.antorcha
-            elif e.key in (pygame.K_UP, pygame.K_w, pygame.K_DOWN, pygame.K_s,
-                           pygame.K_LEFT, pygame.K_a, pygame.K_RIGHT, pygame.K_d):
-                self.teclas.add(e.key)
-        elif e.type == pygame.KEYUP:
-            self.teclas.discard(e.key)
+                return
+        self.controlador.evento(e)
 
     def _interactuar(self):
         """Reacciona a E según el objeto más cercano: abre el Umbral, habla con los sobrevivientes, intercambia fragmentos con Tizón o describe el entorno. Recibe/devuelve: nada."""
@@ -549,32 +568,21 @@ class Campamento(Pantalla):
     def actualizar(self, dt):
         """Mueve al personaje con colisiones, anima las armaduras, el mensaje y las chispas, y abre el portón cuando se interactúa. Recibe: dt (segundos). Devuelve: nada."""
         super().actualizar(dt)
-        self.app.punto_guardado = tuple(self.personaje)
         if self.abriendo:
             self.porton_anim = min(1.0, self.porton_anim + dt * 1.7)
             if self.porton_anim >= 1.0:
                 self.app.ir_a(Niveles(self.app))
                 return
-        dx = 0 if self.abriendo else \
-             int(any(k in self.teclas for k in (pygame.K_RIGHT, pygame.K_d))) - \
-             int(any(k in self.teclas for k in (pygame.K_LEFT, pygame.K_a)))
-        dy = 0 if self.abriendo else \
-             int(any(k in self.teclas for k in (pygame.K_DOWN, pygame.K_s))) - \
-             int(any(k in self.teclas for k in (pygame.K_UP, pygame.K_w)))
-        self.andando = bool(dx or dy)
-        if self.andando:
-            self.direccion = "arriba" if dy < 0 and abs(dy) >= abs(dx) else \
-                "abajo" if dy > 0 and abs(dy) >= abs(dx) else \
-                "izquierda" if dx < 0 else "derecha"
-        norma = math.hypot(dx, dy) or 1.0
-        paso_x = dx / norma * self.VELOCIDAD * dt
-        paso_y = dy / norma * self.VELOCIDAD * dt
-        for nx, ny in ((self.personaje[0] + paso_x, self.personaje[1]),
-                       (self.personaje[0], self.personaje[1] + paso_y)):
-            caja = pygame.Rect(int(nx - 9), int(ny - 8), 18, 16)
-            if 26 <= nx <= ANCHO - 26 and 244 <= ny <= ALTO - 28 and \
-                    not any(caja.colliderect(r) for r in self.bloqueos):
-                self.personaje[:] = [nx, ny]
+        self.controlador.posicion[:] = self.personaje
+        self.controlador.velocidad = self.VELOCIDAD
+        nueva_pos, self.direccion, self.andando = self.controlador.actualizar(
+            dt,
+            bloqueos=self.bloqueos,
+            limites=self.limites,
+            bloqueado=self.abriendo,
+        )
+        self.personaje[:] = nueva_pos
+        self.app.punto_guardado = tuple(self.personaje)
         for armadura in self.armaduras:
             distancia = math.hypot(self.personaje[0] - armadura["x"],
                                    self.personaje[1] - armadura["y"])
