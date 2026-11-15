@@ -47,6 +47,7 @@ from interfaz.tema import (ANCHO, ALTO, PANEL, BORDE, CIAN, ORO, ROJO, VERDE, MO
                            paleta_de, fuente, texto, texto_ajustado, panel, brillo, mezclar, vineta)
 from interfaz.widgets import (Boton, CampoTexto, icono_play, icono_pausa, icono_atras,
                               icono_inicio, icono_final)
+from interfaz import colisiones_campamento
 from interfaz.controlador_campamento import ControladorCampamento
 try:
     from interfaz.colisiones_campamento import (
@@ -440,6 +441,9 @@ class Creditos(Pantalla):
 # =====================================================================================
 #  CAMPAMENTO / ZONA SEGURA
 # =====================================================================================
+RADIO_INTERACCION = 75      # SEC-08: radio común para NPCs, armaduras y Tizón
+
+
 class Campamento(Pantalla):
     """Refugio explorable desde el que se accede al Umbral y a las expediciones."""
 
@@ -448,7 +452,7 @@ class Campamento(Pantalla):
     def __init__(self, app, posicion=None):
         """Prepara el refugio: personaje, árboles, bloqueos de colisión, armaduras y duende. Recibe: app y posicion inicial (opcional; si no, el punto guardado). Devuelve: nada (constructor)."""
         super().__init__(app)
-        self.personaje = list(posicion or app.punto_guardado or (550.0, 596.0))
+        self.personaje = list(posicion or app.punto_guardado or (550.0, 560.0))
         self.teclas = set()
         self.direccion = "abajo"
         self.andando = False
@@ -463,11 +467,11 @@ class Campamento(Pantalla):
         self.mensaje_tiempo = 4.0
         self.particulas = Particulas()
         if getattr(self.fondo_pixel, "usa_imagen", False):
-            self.pos_mara = (295, 485)
-            self.pos_ivo = (725, 440)
-            self.pos_nela = (370, 560)
-            self.duende = (655, 545)
-            self.umbral_pos = (550, 210)
+            self.pos_mara = (315, 310)
+            self.pos_ivo = (740, 510)
+            self.pos_nela = (315, 525)
+            self.duende = (755, 325)
+            self.umbral_pos = (550, 205)
         else:
             self.pos_mara = (370, 443)
             self.pos_ivo = (735, 526)
@@ -502,31 +506,36 @@ class Campamento(Pantalla):
             limites=self.limites,
             bloqueos=self.bloqueos,
         )
-        self.teclas = self.controlador.teclas
 
     def evento(self, e):
         """Teclas del campamento: Esc/Retroceso vuelven al menú, E/Enter/Espacio interactúan, L alterna la antorcha y las flechas/WASD se anotan para mover. Recibe: e. Devuelve: nada."""
+        if e.type == getattr(pygame, "WINDOWFOCUSLOST", -1):
+            self.teclas.clear()          # SEC-02: evita teclas pegadas tras Alt+Tab
+            return
         if self.abriendo:
-            self.controlador.limpiar_teclas()
+            self.teclas.clear()
             return
         if e.type == pygame.KEYDOWN:
             if e.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
-                self.controlador.limpiar_teclas()
+                self.teclas.clear()
                 self.app.guardar_checkpoint(self.personaje)
                 self.app.ir_a(Menu(self.app))
                 return
             elif e.key in (pygame.K_e, pygame.K_RETURN, pygame.K_SPACE):
-                self._interactuar()
+                self._interactuar(e.key)
                 if self.abriendo:
-                    self.controlador.limpiar_teclas()
+                    self.teclas.clear()
                 return
             elif e.key == pygame.K_l:
                 self.antorcha = not self.antorcha
                 self.app.antorcha_encendida = self.antorcha
                 return
-        self.controlador.evento(e)
+        if e.type == pygame.KEYDOWN and e.key in MOVIMIENTOS:
+            self.teclas.add(e.key)
+        elif e.type == pygame.KEYUP:
+            self.teclas.discard(e.key)
 
-    def _interactuar(self):
+    def _interactuar(self, tecla=pygame.K_e):
         """Reacciona a E según el objeto más cercano: abre el Umbral, habla con los sobrevivientes, intercambia fragmentos con Tizón o describe el entorno. Recibe/devuelve: nada."""
         x, y = self.personaje
         if math.hypot(x - self.umbral_pos[0], y - self.umbral_pos[1]) < 135:
@@ -534,14 +543,14 @@ class Campamento(Pantalla):
             self.app.guardar_checkpoint(self.personaje)
             self.abriendo = True
             self.mensaje = "El Umbral se está abriendo..."
-            self.mensaje_tiempo = 0
-        elif math.hypot(x - self.pos_mara[0], y - self.pos_mara[1]) < 78:
+            self.mensaje_tiempo = 3.5     # SEC-06: mensaje legible
+        elif math.hypot(x - self.pos_mara[0], y - self.pos_mara[1]) < RADIO_INTERACCION:
             self.mensaje = "Mara: la marca de tiza señala dónde volver si una placa despierta."
             self.mensaje_tiempo = 4.5
-        elif math.hypot(x - self.pos_ivo[0], y - self.pos_ivo[1]) < 78:
+        elif math.hypot(x - self.pos_ivo[0], y - self.pos_ivo[1]) < RADIO_INTERACCION:
             self.mensaje = "Ivo: cuando la puerta rechina, algo se mueve al otro lado."
             self.mensaje_tiempo = 4.5
-        elif math.hypot(x - self.pos_nela[0], y - self.pos_nela[1]) < 78:
+        elif math.hypot(x - self.pos_nela[0], y - self.pos_nela[1]) < RADIO_INTERACCION:
             self.mensaje = "Nela: vuelve con vida. La hoguera no puede esperar para siempre."
             self.mensaje_tiempo = 4.5
         elif math.hypot(x - 266, y - 356) < 120:
@@ -556,8 +565,11 @@ class Campamento(Pantalla):
         elif math.hypot(x - 138, y - 599) < 110:
             self.mensaje = "El carro llegó cargado de tablones. Nadie recuerda quién lo empujó."
             self.mensaje_tiempo = 4.5
-        elif math.hypot(x - self.duende[0], y - self.duende[1]) < 85:
-            if self.app.fragmentos_mapa > 0:
+        elif math.hypot(x - self.duende[0], y - self.duende[1]) < RADIO_INTERACCION:
+            if tecla != pygame.K_e:          # SEC-09: el trueque exige E
+                self.mensaje = "Tizón: pulsa E para confirmar el trueque."
+                self.mensaje_tiempo = 3.5
+            elif self.app.fragmentos_mapa > 0:
                 self.app.fragmentos_mapa -= 1
                 self.app.pistas_duende += 1
                 self.app.guardar_checkpoint(self.personaje)
@@ -570,7 +582,7 @@ class Campamento(Pantalla):
         elif math.hypot(x - 166, y - 290) < 140:
             self.mensaje = "Las lápidas son anteriores al campamento. Una tiene tierra fresca."
             self.mensaje_tiempo = 4.5
-        elif any(math.hypot(x - a["x"], y - a["y"]) < 78 for a in self.armaduras):
+        elif any(math.hypot(x - a["x"], y - a["y"]) < RADIO_INTERACCION for a in self.armaduras):
             self.mensaje = "La armadura no tiene a nadie dentro... pero acaba de moverse."
             self.mensaje_tiempo = 4.5
         else:
@@ -585,15 +597,19 @@ class Campamento(Pantalla):
             if self.porton_anim >= 1.0:
                 self.app.ir_a(Niveles(self.app))
                 return
-        self.controlador.posicion[:] = self.personaje
-        self.controlador.velocidad = self.VELOCIDAD
-        nueva_pos, self.direccion, self.andando = self.controlador.actualizar(
-            dt,
-            bloqueos=self.bloqueos,
-            limites=self.limites,
-            bloqueado=self.abriendo,
-        )
-        self.personaje[:] = nueva_pos
+        dx = dy = 0
+        if not self.abriendo:
+            dx = (any(k in self.teclas for k in (pygame.K_RIGHT, pygame.K_d))
+                  - any(k in self.teclas for k in (pygame.K_LEFT, pygame.K_a)))
+            dy = (any(k in self.teclas for k in (pygame.K_DOWN, pygame.K_s))
+                  - any(k in self.teclas for k in (pygame.K_UP, pygame.K_w)))
+        nx, ny, self.direccion, self.andando = colisiones_campamento.resolver_movimiento_campamento(
+            self.personaje, dx, dy, dt, radio=9)
+        self.personaje[:] = (nx, ny)
+        if hasattr(self, "controlador"):
+            self.controlador.posicion = list(self.personaje)
+            self.controlador.direccion = self.direccion
+            self.controlador.andando = self.andando
         self.app.punto_guardado = tuple(self.personaje)
         for armadura in self.armaduras:
             distancia = math.hypot(self.personaje[0] - armadura["x"],
@@ -601,7 +617,7 @@ class Campamento(Pantalla):
             if distancia > 112 and armadura["estado"] == "caida":
                 armadura["estado"] = "levantando"
                 armadura["tiempo"] = 0.0
-            elif distancia > 112 and armadura["estado"] == "quieta":
+            elif distancia >= 62 and armadura["estado"] == "quieta":     # SEC-03
                 armadura["activada"] = False
             elif distancia < 62 and not armadura["activada"] and armadura["estado"] == "quieta":
                 armadura["estado"] = "cayendo"
@@ -802,6 +818,23 @@ class Campamento(Pantalla):
         pygame.draw.rect(surf, (95, 67, 41), (x + 2, y + 6, 8, 7))
         self._etiquetas.append(("TIZÓN · DUENDE", x, y + 25, (190, 198, 140)))
 
+    def _objetivo_cercano(self):
+        """Texto HUD del objetivo interactuable más cercano, o None. Recibe: nada. Devuelve: str o None."""
+        x, y = self.personaje
+        if math.hypot(x - self.umbral_pos[0], y - self.umbral_pos[1]) < 135:
+            return "E  ·  ABRIR EL UMBRAL"
+        candidatos = [("E  ·  HABLAR CON MARA", self.pos_mara),
+                      ("E  ·  HABLAR CON IVO", self.pos_ivo),
+                      ("E  ·  HABLAR CON NELA", self.pos_nela),
+                      ("E  ·  TRUEQUE CON TIZÓN", self.duende)]
+        candidatos += [("E  ·  EXAMINAR ARMADURA", (a["x"], a["y"])) for a in self.armaduras]
+        mejor = None
+        for texto_hud, (px, py) in candidatos:
+            d = math.hypot(x - px, y - py)
+            if d < RADIO_INTERACCION and (mejor is None or d < mejor[0]):
+                mejor = (d, texto_hud)
+        return mejor[1] if mejor else None
+
     def dibujar(self, surf):
         """Dibuja todo el campamento (fondo, objetos, personajes, pixelado) y encima el HUD con las indicaciones. Recibe: surf. Devuelve: nada."""
         self._etiquetas = []          # rótulos de personajes: se pintan DESPUÉS del pixelado
@@ -817,8 +850,6 @@ class Campamento(Pantalla):
 
             self._dibujar_cementerio(surf)
             self._dibujar_porton(surf)
-            for armadura in self.armaduras:
-                self._dibujar_armadura(surf, armadura)
             # Refugios y objetos cotidianos del campamento.
             pygame.draw.polygon(surf, (68, 45, 31), [(94, 519), (177, 455), (260, 519)])
             pygame.draw.polygon(surf, (104, 76, 48), [(110, 514), (177, 468), (244, 514)])
@@ -862,12 +893,25 @@ class Campamento(Pantalla):
         self.particulas.dibujar(surf)
         self.ambiente.dibujar_chispas(surf)
         self.ambiente.dibujar_humo(surf)
-        self._dibujar_sobreviviente(surf, self.pos_mara[0], self.pos_mara[1], "MARA · CARTÓGRAFA", (134, 112, 65))
-        self._dibujar_sobreviviente(surf, self.pos_ivo[0], self.pos_ivo[1], "IVO · VIGÍA", (100, 113, 68))
-        self._dibujar_sobreviviente(surf, self.pos_nela[0], self.pos_nela[1], "NELA · CURANDERA", (132, 72, 52))
-        self._dibujar_duende(surf)
-        dibujar_jugador(surf, self.personaje[0], self.personaje[1], 48, self.t,
-                        self.antorcha, self.direccion, self.andando)
+        # Y-Sorting unificado (SEC-14): viajero, NPCs y armaduras ordenados por su Y.
+        entidades = [
+            {"y": self.pos_mara[1], "dibujar": lambda: self._dibujar_sobreviviente(
+                surf, self.pos_mara[0], self.pos_mara[1], "MARA · CARTÓGRAFA", (134, 112, 65))},
+            {"y": self.pos_ivo[1], "dibujar": lambda: self._dibujar_sobreviviente(
+                surf, self.pos_ivo[0], self.pos_ivo[1], "IVO · VIGÍA", (100, 113, 68))},
+            {"y": self.pos_nela[1], "dibujar": lambda: self._dibujar_sobreviviente(
+                surf, self.pos_nela[0], self.pos_nela[1], "NELA · CURANDERA", (132, 72, 52))},
+            {"y": self.duende[1], "dibujar": lambda: self._dibujar_duende(surf)},
+            {"y": self.personaje[1], "dibujar": lambda: dibujar_jugador(
+                surf, self.personaje[0], self.personaje[1], 48, self.t,
+                self.antorcha, self.direccion, self.andando)},
+        ]
+        for armadura in self.armaduras:
+            entidades.append({"y": armadura["y"],
+                              "dibujar": lambda a=armadura: self._dibujar_armadura(surf, a)})
+        entidades.sort(key=lambda e: e["y"])
+        for entidad in entidades:
+            entidad["dibujar"]()
         self.ambiente.dibujar_luciernagas(surf)
         self.ambiente.dibujar_vineta(surf)
 
@@ -885,15 +929,11 @@ class Campamento(Pantalla):
               (self.app.fragmentos_mapa, self.app.pistas_duende), 13, ORO,
               (47, 108), sombra=False)
 
-        cerca_porton = math.hypot(self.personaje[0] - self.umbral_pos[0], self.personaje[1] - self.umbral_pos[1]) < 135
-        cerca_duende = math.hypot(self.personaje[0] - self.duende[0],
-                                  self.personaje[1] - self.duende[1]) < 85
-        indicacion = "E  ·  ABRIR EL UMBRAL" if cerca_porton else \
-            "E  ·  TRUEQUE CON TIZÓN" if cerca_duende else \
-            "WASD / FLECHAS · MOVER     E · INTERACTUAR     L · ANTORCHA"
+        objetivo = self._objetivo_cercano()          # SEC-11: indicador dinámico
+        indicacion = objetivo or "WASD / FLECHAS · MOVER     E · INTERACTUAR     L · ANTORCHA"
         panel(surf, pygame.Rect(26, 638, 1048, 56), 228)
-        texto(surf, indicacion, 15, ORO if cerca_porton else TEXTO,
-              (ANCHO // 2, 656), "midtop", negrita=cerca_porton)
+        texto(surf, indicacion, 15, ORO if objetivo else TEXTO,
+              (ANCHO // 2, 656), "midtop", negrita=bool(objetivo))
         if self.mensaje_tiempo > 0:
             texto(surf, self.mensaje, 13, APAGADO, (ANCHO // 2, 678), "midtop", sombra=False)
 

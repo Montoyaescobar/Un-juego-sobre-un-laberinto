@@ -15,7 +15,19 @@ import random
 import pygame
 
 from interfaz.tema import brillo
-from interfaz.colisiones_campamento import CENTRO_HOGUERA, LIMITE_NORTE
+
+try:
+    from interfaz.colisiones_campamento import COORD_HOGUERA as CENTRO_HOGUERA
+except ImportError:
+    try:
+        from interfaz.colisiones_campamento import CENTRO_HOGUERA
+    except ImportError:
+        CENTRO_HOGUERA = (550, 360)
+
+try:
+    from interfaz.colisiones_campamento import LIMITE_NORTE
+except ImportError:
+    LIMITE_NORTE = 180
 
 
 class AmbienteRefugio:
@@ -39,6 +51,7 @@ class AmbienteRefugio:
         self.calidad = 1                 # 1 = completo; 0 = reducido (si el equipo va lento)
         self._dt_suave = 1 / 60
         self._tiempo_lento = 0.0
+        self._tiempo_estable = 0.0
         azar = random.Random(5)
         self.luciernagas = [{"x": azar.uniform(60, ancho - 60), "y": azar.uniform(200, alto - 70),
                              "fase": azar.uniform(0, math.tau), "vel": azar.uniform(0.25, 0.6),
@@ -129,12 +142,24 @@ class AmbienteRefugio:
         self.t += dt
         self.efectos = efectos
         self._dt_suave += (dt - self._dt_suave) * 0.05
-        if self.calidad and self._dt_suave > 1 / 28:         # menos de ~28 cuadros por segundo
-            self._tiempo_lento += dt
-            if self._tiempo_lento > 2.0:
-                self.calidad = 0
+        if self.calidad:
+            self._tiempo_estable = 0.0
+            if self._dt_suave > 1 / 28:                      # menos de ~28 cuadros por segundo
+                self._tiempo_lento += dt
+                if self._tiempo_lento > 2.0:
+                    self.calidad = 0
+                    self._tiempo_lento = 0.0
+            else:
+                self._tiempo_lento = max(0.0, self._tiempo_lento - dt)
         else:
-            self._tiempo_lento = max(0.0, self._tiempo_lento - dt)
+            if self._dt_suave < 1 / 45:                      # más de 45 cuadros por segundo estables
+                self._tiempo_estable += dt
+                if self._tiempo_estable > 3.0:
+                    self.calidad = 1
+                    self._tiempo_estable = 0.0
+                    self._tiempo_lento = 0.0
+            else:
+                self._tiempo_estable = 0.0
 
         fx, fy = self.fuego
         viento = 14 * math.sin(self.t * 0.35) + 8

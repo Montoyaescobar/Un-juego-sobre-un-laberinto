@@ -14,12 +14,19 @@ from pathlib import Path
 import pygame
 
 from juego.puntajes import TablaPuntajes
+from interfaz import colisiones_campamento
 from interfaz.efectos import Sonidos
 from interfaz.pantallas import Menu
 from interfaz.tema import (ANCHO, ALTO, ROJO, TEXTO, APAGADO, BRILLO_INICIAL, OSCURIDAD_POR_BRILLO,
                            EFECTOS_INICIAL, NOMBRES_EFECTOS, Fondo, capa_crt, panel, texto)
 
+try:
+    from interfaz.colisiones_campamento import validar_posicion_segura
+except ImportError:
+    validar_posicion_segura = None
+
 DURACION_TRANSICION = 0.35      # segundos que tarda en disolverse la pantalla anterior
+COORD_SPAWN_FALLBACK = (550.0, 560.0)
 
 
 class App:
@@ -58,6 +65,8 @@ class App:
         self.fade = 1.0                  # solo al abrir el juego: sale del negro
         self.transicion = 0.0            # 1 = recién cambió de pantalla; baja a 0 mientras se disuelve
         self.instantanea = None          # copia del último cuadro de la pantalla anterior
+        self._velo_transicion = pygame.Surface((ANCHO, ALTO))
+        self._velo_transicion.fill((0, 0, 0))
         self.pantalla = Menu(self)
 
     def ir_a(self, pantalla):
@@ -85,7 +94,7 @@ class App:
         return raiz / "LaberintoUmbral" / "checkpoint.json"
 
     def _cargar_checkpoint(self):
-        """Recupera el último refugio guardado si el archivo es válido."""
+        """Recupera el último refugio guardado si el archivo es válido, acotando y validando la posición."""
         try:
             datos = json.loads(self._archivo_checkpoint().read_text(encoding="utf-8"))
             self.antorcha_encendida = bool(datos.get("antorcha", True))
@@ -93,27 +102,52 @@ class App:
             self.pistas_duende = max(0, int(datos.get("pistas_duende", 0)))
             self.brillo = min(len(OSCURIDAD_POR_BRILLO) - 1, max(0, int(datos.get("brillo", self.brillo))))
             self.efectos = min(len(NOMBRES_EFECTOS) - 1, max(0, int(datos.get("efectos", self.efectos))))
-            return (float(datos["x"]), float(datos["y"]))
+            raw_x = float(datos["x"])
+            raw_y = float(datos["y"])
+            if not (math.isfinite(raw_x) and math.isfinite(raw_y)):
+                return COORD_SPAWN_FALLBACK
+            x = max(60.0, min(ANCHO - 60.0, raw_x))
+            y = max(180.0, min(ALTO - 60.0, raw_y))
+            validador = validar_posicion_segura or getattr(colisiones_campamento, "validar_posicion_segura", None)
+            if callable(validador):
+                pos_segura = validador((x, y))
+                return (float(pos_segura[0]), float(pos_segura[1]))
+            if raw_x != x or raw_y != y:
+                return COORD_SPAWN_FALLBACK
+            if hasattr(colisiones_campamento, "es_posicion_valida") and hasattr(colisiones_campamento, "caja_personaje"):
+                caja = colisiones_campamento.caja_personaje(x, y)
+                bloqueos = colisiones_campamento.obtener_bloqueos_campamento()
+                limites = colisiones_campamento.obtener_limites_campamento()
+                if not colisiones_campamento.es_posicion_valida(caja, bloqueos, limites):
+                    return COORD_SPAWN_FALLBACK
+            return (x, y)
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
             return None
 
     def guardar_checkpoint(self, posicion):
-        """Guarda la posición segura actual y la preferencia de antorcha."""
+        """Guarda la posición segura actual y la preferencia de antorcha mediante escritura atómica."""
         self.punto_guardado = (float(posicion[0]), float(posicion[1]))
-        archivo = self._archivo_checkpoint()
+        archivo = Path(self._archivo_checkpoint())
+        temp_archivo = archivo.with_name(archivo.name + ".tmp")
         try:
             archivo.parent.mkdir(parents=True, exist_ok=True)
-            archivo.write_text(json.dumps({"x": self.punto_guardado[0],
-                                           "y": self.punto_guardado[1],
-                                           "antorcha": self.antorcha_encendida,
-                                           "fragmentos_mapa": self.fragmentos_mapa,
-                                           "pistas_duende": self.pistas_duende,
-                                           "brillo": self.brillo,
-                                           "efectos": self.efectos}),
-                               encoding="utf-8")
+            contenido = json.dumps({"x": self.punto_guardado[0],
+                                    "y": self.punto_guardado[1],
+                                    "antorcha": self.antorcha_encendida,
+                                    "fragmentos_mapa": self.fragmentos_mapa,
+                                    "pistas_duende": self.pistas_duende,
+                                    "brillo": self.brillo,
+                                    "efectos": self.efectos})
+            temp_archivo.write_text(contenido, encoding="utf-8")
+            temp_archivo.replace(archivo)
             self.aviso_guardado = ""
             self.aviso_tiempo = 0.0
         except OSError:
+            try:
+                if temp_archivo.exists():
+                    temp_archivo.unlink()
+            except OSError:
+                pass
             # La partida sigue funcionando aunque el sistema no permita guardar, pero se avisa.
             self.aviso_guardado = "No se pudo guardar tu punto seguro en esta carpeta."
             self.aviso_tiempo = 7.0
@@ -147,9 +181,8 @@ class App:
         self.lienzo.blit(self.crt, (0, 0))
         if self.fade > 0:
             self.fade = max(0.0, self.fade - dt * 4)
-            velo = pygame.Surface((ANCHO, ALTO))
-            velo.set_alpha(int(255 * self.fade))
-            self.lienzo.blit(velo, (0, 0))
+            self._velo_transicion.set_alpha(int(255 * self.fade))
+            self.lienzo.blit(self._velo_transicion, (0, 0))
         if self.aviso_tiempo > 0:
             self.aviso_tiempo = max(0.0, self.aviso_tiempo - dt)
             self._dibujar_aviso()
@@ -179,9 +212,8 @@ class App:
         self.lienzo.blit(self.instantanea, (0, 0))
         oscuro = int(110 * math.sin(math.pi * k))                      # más oscuro en la mitad
         if oscuro > 0:
-            velo = pygame.Surface((ANCHO, ALTO))
-            velo.set_alpha(oscuro)
-            self.lienzo.blit(velo, (0, 0))
+            self._velo_transicion.set_alpha(oscuro)
+            self.lienzo.blit(self._velo_transicion, (0, 0))
 
     def _dibujar_aviso(self):
         """
