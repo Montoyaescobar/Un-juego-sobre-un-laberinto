@@ -1,261 +1,342 @@
-# Plan de Tareas: Corrección del Movimiento y Campamento
+# Plan de Orquestación Multi-Agente: Migración de Escena, Colisiones por Máscara y Estabilización del Campamento
 
-Este documento define la arquitectura y asignación de tareas para resolver el bug crítico de atasco y restricción de movimiento del personaje en la zona del **Campamento (Claro de Ceniza)** del juego.
+**Proyecto:** *Laberinto: El Umbral de Ceniza* (`lab_v2`)  
+**Módulo:** Campamento (*Claro de Ceniza*)  
+**Resolución Viewport:** Fija $1100 \times 720$ px (`ANCHO = 1100`, `ALTO = 720` en `lab_v2/interfaz/tema.py`)  
+**Estrategia de Ejecución:** Paralela por Oleadas (*Waves*) con Aislamiento Estricto de Propiedad de Archivos (*Zero-Conflict*)
 
 ---
 
-## 1. Diagnóstico Técnico del Bug
+## 1. Topología de Agentes y Matriz de Propiedad de Archivos
 
-Tras analizar el código fuente en `lab_v2/interfaz/pantallas.py`, se identificaron dos causas raíces complementarias que provocan que el personaje se quede trabado "en la nada":
+Para evitar colisiones de Git y condiciones de carrera en disco, cada agente opera exclusivamente sobre un conjunto disjunto de archivos. Ningún agente puede modificar archivos asignados a otro.
 
-1. **Colisiones y Límites Desalineados / Fantasmas (Problema de Entorno):**
-   * **Muro invisible superior:** La condición `26 <= nx <= ANCHO - 26 and 244 <= ny <= ALTO - 28` en `actualizar()` establece una barrera horizontal invisible en `y = 244`. El claro visual dibujado con `ellipse` comienza en `y = 138`, por lo que el jugador se bloquea en mitad del claro abierto sin razón visual.
-   * **Hitbox gigante de la hoguera:** La fogata visual tiene su centro en `(550, 478)` con un radio de aproximadamente 30-40 px, pero la caja de colisión `pygame.Rect(454, 432, 192, 97)` bloquea un rectángulo de 192x97 px, dejando enormes áreas vacías a los costados donde el personaje choca contra el aire.
-   * **Hitbox excesivo del portón:** `self.porton.inflate(22, 18)` proyecta la colisión demasiado hacia abajo, dificultando el acercamiento natural al Umbral.
-   * **Cajas de colisión de carpas, hamaca y carro:** Cajas rígidas que no se ajustan a los polígonos dibujados.
+$$\text{Archivos}(\text{Agent-Physics}) \cap \text{Archivos}(\text{Agent-Scene}) \cap \text{Archivos}(\text{Agent-Core}) = \emptyset$$
 
-2. **Físicas y Actualización de Posición Defectuosas (Problema de Controlador):**
-   * **Sobrescritura destructiva en movimiento diagonal:**
-     ```python
-     for nx, ny in ((self.personaje[0] + paso_x, self.personaje[1]),
-                    (self.personaje[0], self.personaje[1] + paso_y)):
-         caja = pygame.Rect(int(nx - 9), int(ny - 8), 18, 16)
-         if ... and not any(caja.colliderect(r) for r in self.bloqueos):
-             self.personaje[:] = [nx, ny]
+```mermaid
+graph TD
+    subgraph "WAVE 1: Implementación Paralela Aislada"
+        A1["Agent-Physics-Mask<br/>(Física, Máscara y Tests)"]
+        A2["Agent-Scene-Entities<br/>(Escena, NPCs, HUD y Bugs UI)"]
+        A3["Agent-Core-Performance<br/>(Persistencia Atómica y Memoria)"]
+    end
+
+    subgraph "Contratos de Interfaz (Bloqueantes)"
+        C1["colisiones_campamento.py<br/>API: resolver_movimiento_campamento()<br/>API: es_posicion_caminable()<br/>API: validar_posicion_segura()"]
+    end
+
+    subgraph "WAVE 2: Validación Cruzada e Integración"
+        V1["Test Suite de Colisiones<br/>(test_colisiones_campamento.py)"]
+        V2["Smoke Test de Integración<br/>(run_tests.py + main.py)"]
+    end
+
+    A1 --> C1
+    C1 -. Consumido por .-> A2
+    A1 --> V1
+    A2 --> V2
+    A3 --> V2
+```
+
+### Tabla de Propiedad Estricta
+
+| Agente | Identificador | Rol Principal | Archivos Permitidos (Escritura Exclusiva) | Archivos Prohibidos (Solo Lectura o Sin Acceso) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Agente 1** | `Agent-Physics-Mask` | Especialista en Visión/Máscaras, Físicas de Navegación y Suite de Pruebas Unitarias. | • `lab_v2/herramientas/procesar_mascara_campamento.py`<br>• `lab_v2/interfaz/colisiones_campamento.py`<br>• `lab_v2/pruebas/test_colisiones_campamento.py`<br>• Generación de `nav_campamento.png` (en raíz o ubicación resuelta) | • `lab_v2/interfaz/pantallas.py`<br>• `lab_v2/interfaz/app.py`<br>• `lab_v2/interfaz/ambiente.py`<br>• `lab_v2/interfaz/arte_pixel.py` |
+| **Agente 2** | `Agent-Scene-Entities` | Especialista en Escena, Renderizado de Entidades, Y-Sorting, Indicadores HUD y Corrección de Bugs de Control/UI. | • `lab_v2/interfaz/pantallas.py` (exclusivamente la clase `Campamento` y métodos asociados) | • `lab_v2/interfaz/colisiones_campamento.py`<br>• `lab_v2/herramientas/*`<br>• `lab_v2/interfaz/app.py`<br>• `lab_v2/interfaz/ambiente.py`<br>• `lab_v2/interfaz/arte_pixel.py` |
+| **Agente 3** | `Agent-Core-Performance` | Especialista en Persistencia Atómica, Gestión de Memoria, Optimización de Ciclo de Vida y Validación Global. | • `lab_v2/interfaz/app.py`<br>• `lab_v2/interfaz/ambiente.py`<br>• `lab_v2/interfaz/arte_pixel.py` | • `lab_v2/interfaz/pantallas.py`<br>• `lab_v2/interfaz/colisiones_campamento.py`<br>• `lab_v2/pruebas/*` |
+
+---
+
+## 2. Contratos de Interfaz Compartidos (API Freeze)
+
+Ambos agentes consumidores (`Agent-Scene-Entities` y `Agent-Core-Performance`) asumen de forma estricta las siguientes firmas y constantes implementadas por `Agent-Physics-Mask` en `lab_v2/interfaz/colisiones_campamento.py`.
+
+### 2.1. Constantes Canónicas de Coordenadas
+
+```python
+# Coordenadas maestras alineadas al nuevo fondo (1100 x 720)
+COORD_UMBRAL: tuple[int, int]   = (550, 205)  # Punto focal de interacción del portón norte
+COORD_HOGUERA: tuple[int, int]  = (550, 360)  # Centro del fuego (transitable libremente)
+COORD_SPAWN: tuple[float, float] = (550.0, 560.0) # Posición inicial segura en el sendero sur
+
+# Puestos de NPCs (ubicados en zonas transitables inmediatamente contiguas a sus mesas)
+COORD_MARA: tuple[int, int]     = (315, 310)  # Cartógrafa (junto al atril/mapas oeste)
+COORD_NELA: tuple[int, int]     = (315, 525)  # Curandera (junto al puesto de pociones suroeste)
+COORD_TIZON: tuple[int, int]    = (755, 325)  # Duende (junto a reliquias/altar noreste)
+COORD_IVO: tuple[int, int]      = (740, 510)  # Vigía (junto a armas/atalaya sureste)
+```
+
+### 2.2. Firmas de Funciones Exportadas
+
+```python
+def es_posicion_caminable(x: float, y: float, radio: int = 9) -> bool:
+    """
+    Evalúa si una coordenada (y su bounding box de radio dado) es transitable
+    consultando la máscara binaria de navegación de 1100x720.
+    Retorna True si el área está completamente libre de obstáculos; False en colisión o fuera de límites.
+    """
+    ...
+
+def resolver_movimiento_campamento(
+    pos_actual: list[float] | tuple[float, float],
+    dx: float,
+    dy: float,
+    dt: float,
+    velocidad: float = 190.0,
+    radio: int = 9
+) -> tuple[float, float, str, bool]:
+    """
+    Aplica física continua con deslizamiento independiente por ejes (Wall Sliding).
+    Evalúa X e Y por separado para evitar atascos en diagonales y esquinas.
+    Retorna: (nueva_x, nueva_y, direccion_cardinal, esta_andando)
+    """
+    ...
+
+def validar_posicion_segura(
+    pos_candidata: tuple[float, float] | list[float],
+    fallback: tuple[float, float] = COORD_SPAWN
+) -> tuple[float, float]:
+    """
+    Verifica si una posición cargada desde un archivo de guardado es transitable.
+    Si colisiona con un obstáculo o está fuera del mapa, retorna la posición fallback segura.
+    """
+    ...
+
+def dibujar_debug_colisiones(superficie: pygame.Surface, alpha: int = 120) -> None:
+    """
+    Superpone la máscara de colisiones en tiempo real sobre la superficie dada
+    (rojo = sólido, verde/transparente = caminable) para pruebas de desarrollo.
+    """
+    ...
+```
+
+---
+
+## 3. Plan de Ejecución por Oleadas (Waves)
+
+---
+
+### WAVE 1: Implementación Paralela Desacoplada (Sin Bloqueos)
+
+```text
+├── [T-01] [Agent-Physics-Mask] Extracción y generación de nav_campamento.png
+├── [T-02] [Agent-Physics-Mask] Motor de colisiones por máscara (colisiones_campamento.py)
+├── [T-03] [Agent-Scene-Entities] Limpieza de renderizado procedural y Y-Sorting (pantallas.py)
+├── [T-04] [Agent-Scene-Entities] Reubicación de NPCs y corrección de bugs de interacción (pantallas.py)
+├── [T-05] [Agent-Core-Performance] Persistencia atómica y clamp de coordenadas (app.py)
+└── [T-06] [Agent-Core-Performance] Reutilización de buffers y recuperación de FPS (ambiente.py, arte_pixel.py)
+```
+
+#### `[T-01]` Pipeline de Extracción de Máscara de Navegación
+* **Agente:** `Agent-Physics-Mask`
+* **Archivos Objetivo:**
+  * `lab_v2/herramientas/procesar_mascara_campamento.py` *(nuevo)*
+  * Generación de `nav_campamento.png` (resolución canónica $1100 \times 720$)
+* **Dependencias:** Ninguna (inicio inmediato).
+* **Instrucciones Técnicas:**
+  1. Localizar el asset de entrada `mascara_caminable` (`.jpg` o `.png`) fuera del directorio `lab_v2/` mediante búsqueda ascendente con `pathlib.Path(__file__).resolve()`. No utilizar rutas hardcodeadas.
+  2. Implementar `lab_v2/herramientas/procesar_mascara_campamento.py`:
+     - Cargar la imagen y asegurar dimensiones de $1100 \times 720$ px.
+     - Filtrar el área caminable identificando los píxeles con predominancia verde ($G > 120$ y $G > R \times 1.2$ y $G > B \times 1.2$).
+     - **Forzado de tránsito vital:** Pintar explícitamente como caminable el radio de la hoguera central (`cx=550, cy=360, radio=65`) y el pasillo de acceso frontal al Umbral (`x: 500-600, y: 170-240`).
+     - Guardar la máscara optimizada de 1-bit / 8-bit en escala de grises como `nav_campamento.png` (blanco = 255 = transitable, negro = 0 = sólido).
+  3. Ejecutar el script y verificar la creación física del archivo procesado.
+* **Criterio de Verificación:**
+  - El archivo `nav_campamento.png` existe, tiene dimensiones exactas de $1100 \times 720$ y el centro `(550, 360)` contiene píxeles de valor 255.
+
+---
+
+#### `[T-02]` Motor de Física de Navegación y Deslizamiento
+* **Agente:** `Agent-Physics-Mask`
+* **Archivos Objetivo:**
+  * `lab_v2/interfaz/colisiones_campamento.py` *(reemplazo/actualización completa)*
+* **Dependencias:** `[T-01]`
+* **Instrucciones Técnicas:**
+  1. Cargar `nav_campamento.png` usando `pygame.image.load` y convertirlo en un `pygame.Mask` o matriz de acceso rápido $O(1)$.
+  2. Implementar `es_posicion_caminable(x, y, radio=9)`: comprobar los 4 vértices y el centro de la bounding box del viajero contra la máscara. Los límites de pantalla `0 <= x < 1100` e `y` deben respetarse estrictamente.
+  3. Implementar `resolver_movimiento_campamento(...)`:
+     - Normalizar vector `(dx, dy)` para evitar supervelocidad en diagonal.
+     - Calcular desplazamiento `paso_x = dx * velocidad * dt` y `paso_y = dy * velocidad * dt`.
+     - **Deslizamiento por ejes (*Wall Sliding*):** Evaluar `paso_x` manteniendo `y` constante; si es válido, aplicar `nueva_x`. Evaluar `paso_y` manteniendo `nueva_x`; si es válido, aplicar `nueva_y`. Esto garantiza desplazamiento fluido rozando muros sin frenado en seco.
+     - Determinar dirección cardinal predominante y flag `andando`.
+  4. Implementar `validar_posicion_segura(pos_candidata, fallback=COORD_SPAWN)`: si la posición colisiona con sólidos de la máscara, reubicar en `fallback`.
+  5. Exportar `dibujar_debug_colisiones(superficie, alpha=120)`.
+* **Criterio de Verificación:**
+  - La función `resolver_movimiento_campamento` permite avanzar en diagonal a lo largo de un obstáculo vertical sin detener el avance en Y.
+
+---
+
+#### `[T-03]` Limpieza de Renderizado Procedural Obsoleto y Y-Sorting
+* **Agente:** `Agent-Scene-Entities`
+* **Archivos Objetivo:**
+  * `lab_v2/interfaz/pantallas.py` (método `Campamento.dibujar`)
+* **Dependencias:** Ninguna (puede comenzar en paralelo usando el contrato de la Sección 2).
+* **Instrucciones Técnicas:**
+  1. **Limpieza visual:** En `Campamento.dibujar()`, cuando el fondo ilustrado esté activo (`fondo_pixel.usa_imagen == True`), eliminar completamente el renderizado de primitivas procedurales obsoletas:
+     - No dibujar la elipse verde del claro `(50, 138, 1000, 650)`.
+     - No invocar `_dibujar_arbol()` para los 52 pinos procedurales.
+     - No dibujar las carpas poligonales marrones, carros, mesas de madera ni cementerio procedural.
+     - No dibujar la hoguera vectorial de base (el fondo ilustrado ya la contiene; solo superponer la llama viva pulsante de partículas).
+  2. **Y-Sorting unificado (`SEC-14`):**
+     - Crear una lista unificada de entidades a renderizar: viajero, Mara, Ivo, Nela, Tizón y armaduras.
+     - Ordenar todas las entidades por su coordenada base $Y$ antes de dibujarlas: `entidades.sort(key=lambda e: e['y'])`.
+     - Dibujar los rótulos y nombres de los NPCs inmediatamente vinculados a la entidad o tras el pixelado respetando la oclusión cuando el jugador camina por delante de ellos.
+* **Criterio de Verificación:**
+  - Inspección visual: El fondo ilustrado se visualiza limpio sin artefactos vectoriales superpuestos y el viajero pasa por detrás de un NPC cuando `viajero.y < npc.y` y por delante cuando `viajero.y > npc.y`.
+
+---
+
+#### `[T-04]` Reubicación de Entidades y Corrección de Bugs de Control e Interacción
+* **Agente:** `Agent-Scene-Entities`
+* **Archivos Objetivo:**
+  * `lab_v2/interfaz/pantallas.py` (clase `Campamento`)
+* **Dependencias:** `[T-02]` (o usar fallback de API de la Sección 2).
+* **Instrucciones Técnicas:**
+  1. **Alineación de Coordenadas:** Actualizar las posiciones de entidades a las constantes del contrato:
+     - Umbral: `COORD_UMBRAL = (550, 205)`
+     - Mara: `COORD_MARA = (315, 310)`
+     - Nela: `COORD_NELA = (315, 525)`
+     - Tizón: `COORD_TIZON = (755, 325)`
+     - Ivo: `COORD_IVO = (740, 510)`
+     - Spawn inicial: `COORD_SPAWN = (550.0, 560.0)`
+  2. **Corrección de Bugs Identificados en Auditoría:**
+     - `SEC-02` (*Sticky Keys*): En `Campamento.evento()`, escuchar `pygame.WINDOWFOCUSLOST` (o `ACTIVEEVENT` cuando `gain == 0`) y vaciar inmediatamente `self.teclas.clear()`.
+     - `SEC-03` (*Armaduras Congeladas*): En el autómata de armaduras de `actualizar()`, asegurar que al volver a `"quieta"`, si `distancia >= 62`, se restablezca `armadura["activada"] = False` para permitir reactivaciones futuras.
+     - `SEC-06` (*Mensaje Umbral*): Al interactuar con el Umbral, asignar `self.mensaje_tiempo = 3.5` (en vez de `0`) para que `"El Umbral se está abriendo..."` sea legible.
+     - `SEC-08` (*Radios de Interacción*): Recalibrar distancias euclidianas en `_interactuar()` a radios de 75 px centrados en cada NPC para evitar solapamientos entre puestos contiguos.
+     - `SEC-09` (*Trueque Tizón*): Exigir tecla `E` o confirmación explícita para comerciar fragmentos, evitando el consumo accidental con la barra espaciadora.
+     - `SEC-11` (*Indicadores HUD Contextuales*): Actualizar dinámicamente la leyenda inferior del HUD indicando el objetivo próximo (`"E · HABLAR CON MARA"`, `"E · HABLAR CON NELA"`, `"E · TRUEQUE CON TIZÓN"`, etc.).
+  3. **Integración del Movimiento:** Reemplazar el bucle de actualización de posición por la llamada directa a `colisiones_campamento.resolver_movimiento_campamento(...)`.
+* **Criterio de Verificación:**
+  - Al presionar `E` cerca del Umbral aparece el texto `"El Umbral se está abriendo..."`.
+  - Al pulsar `Alt+Tab` en pleno movimiento y regresar, el personaje permanece detenido.
+
+---
+
+#### `[T-05]` Persistencia Atómica y Sanitización de Coordenadas
+* **Agente:** `Agent-Core-Performance`
+* **Archivos Objetivo:**
+  * `lab_v2/interfaz/app.py`
+* **Dependencias:** Ninguna (puede comenzar en paralelo).
+* **Instrucciones Técnicas:**
+  1. **Persistencia Atómica (`SEC-01`):**
+     - En `App.guardar_checkpoint()`, escribir los datos serializados en un archivo temporal con sufijo `.tmp` (`checkpoint.json.tmp`) en el mismo directorio.
+     - Ejecutar `temp_archivo.replace(archivo_final)` para asegurar atomicidad a nivel de sistema de archivos (POSIX y Windows NTFS), impidiendo archivos corruptos de 0 bytes ante cierres forzados.
+  2. **Validación y Clamp de Checkpoint (`SEC-05`):**
+     - En `App._cargar_checkpoint()`, validar que las coordenadas leídas sean numéricas finitas y acotarlas dentro del área transitable del campamento:
+       `x = max(60.0, min(ANCHO - 60.0, float(datos["x"])))`
+       `y = max(180.0, min(ALTO - 60.0, float(datos["y"])))`
+     - Invocar `colisiones_campamento.validar_posicion_segura((x, y))` para reubicar al jugador en el punto de spawn si el checkpoint guardado quedó dentro de un collider nuevo.
+* **Criterio de Verificación:**
+  - Una prueba unitaria que simule interrupción durante el guardado no corrompe el archivo `checkpoint.json` preexistente.
+  - Cargar un checkpoint con coordenadas inválidas `(-999, -999)` reubica al jugador en `(550.0, 560.0)`.
+
+---
+
+#### `[T-06]` Optimización de Memoria, Recuperación de FPS y Caché de Fondos
+* **Agente:** `Agent-Core-Performance`
+* **Archivos Objetivo:**
+  * `lab_v2/interfaz/ambiente.py`
+  * `lab_v2/interfaz/arte_pixel.py`
+* **Dependencias:** Ninguna (puede comenzar en paralelo).
+* **Instrucciones Técnicas:**
+  1. **Reutilización de Superficies Alfa (`SEC-07` y `SEC-12`):**
+     - En `arte_pixel.py` (`FondoRefugioPixel`), eliminar la asignación de `velo = pygame.Surface(..., pygame.SRCALPHA)` en cada cuadro dentro de `dibujar()`. Preinstanciar un buffer de niebla reutilizable en `__init__` y limpiar con `fill((0, 0, 0, 0))`.
+     - En `app.py` (`_dibujar_transicion`), preinstanciar `self._velo_transicion = pygame.Surface((ANCHO, ALTO))` en el constructor y reutilizarla modificando solo `set_alpha()`.
+  2. **Recuperación Dinámica de Calidad Gráfica (`SEC-10`):**
+     - En `ambiente.py` (`AmbienteRefugio.actualizar()`), implementar recuperación automática de framerate:
+       Si `self.calidad == 0` y la tasa de refresco se estabiliza por encima de 45 FPS (`self._dt_suave < 1 / 45`) durante más de 3.0 segundos acumulados, restaurar `self.calidad = 1` y reactivar niebla y partículas completas.
+  3. **Optimización de Carga del Fondo:**
+     - En `arte_pixel.py`, resolver dinámicamente la ruta de `fondo_campamento` o `LobbyWalppaper.jpg` inspeccionando la raíz del repositorio con `Path`. Convertir la superficie cargada al formato de pantalla con `.convert()` para maximizar el rendimiento del blit en hardware.
+* **Criterio de Verificación:**
+  - Ejecutar el juego y monitorizar la memoria: la tasa de recolección de basura se reduce drásticamente al eliminar la instanciación de superficies por cuadro.
+
+---
+
+### WAVE 2: Pruebas Unitarias, Validación Cruzada e Integración
+
+```text
+├── [T-07] [Agent-Physics-Mask] Suite de pruebas exhaustiva de máscara y colisiones
+├── [T-08] [Agent-Physics-Mask & Agent-Scene-Entities] Validación cruzada de posiciones de NPCs
+└── [T-09] [Agent-Core-Performance] Smoke Test de integración global del proyecto
+```
+
+#### `[T-07]` Suite de Pruebas Unitarias de Máscara y Navegación
+* **Agente:** `Agent-Physics-Mask`
+* **Archivos Objetivo:**
+  * `lab_v2/pruebas/test_colisiones_campamento.py`
+* **Dependencias:** `[T-01]`, `[T-02]`
+* **Instrucciones Técnicas:**
+  1. Actualizar `test_colisiones_campamento.py` utilizando `unittest` en modo *headless* (`SDL_VIDEODRIVER = "dummy"`):
+     - `test_mascara_cargada_correctamente`: Verifica dimensiones $1100 \times 720$ px.
+     - `test_hoguera_transitable`: Verifica que las coordenadas del centro del fuego `(550, 360)` y su perímetro inmediato son transitables (`es_posicion_caminable == True`).
+     - `test_acceso_umbral_despejado`: Verifica camino continuo desde el claro hasta `(550, 205)`.
+     - `test_obstaculos_solidos`: Verifica que las coordenadas de árboles exteriores, rocas norte y mesas devuelven `False`.
+     - `test_wall_sliding_ejes`: Simula movimiento contra una pared vertical confirmando avance en Y.
+     - `test_validar_posicion_segura`: Evalúa recuperación de puntos inválidos.
+  2. Ejecutar suite con: `python -m unittest lab_v2/pruebas/test_colisiones_campamento.py -v`.
+* **Criterio de Verificación:**
+  - Todas las pruebas de `test_colisiones_campamento.py` pasan al 100% (OK) sin advertencias.
+
+---
+
+#### `[T-08]` Validación Cruzada de Posiciones de Entidades
+* **Agentes Responsables:** `Agent-Physics-Mask` (ejecutor) con insumos de `Agent-Scene-Entities`.
+* **Archivos Objetivo:**
+  * `lab_v2/pruebas/test_colisiones_campamento.py`
+* **Dependencias:** `[T-04]`, `[T-07]`
+* **Instrucciones Técnicas:**
+  1. Agregar pruebas de integración en `test_colisiones_campamento.py` que comprueben que cada una de las coordenadas oficiales de NPCs:
+     - `COORD_MARA (315, 310)`
+     - `COORD_NELA (315, 525)`
+     - `COORD_TIZON (755, 325)`
+     - `COORD_IVO (740, 510)`
+     - `COORD_SPAWN (550, 560)`
+     caen exactamente en píxeles transitables de la máscara (`es_posicion_caminable(x, y) == True`).
+  2. Verificar que el radio de interacción de cada NPC no intersecte con el radio del NPC más cercano, garantizando que no haya solapamiento de diálogos (`SEC-08`).
+* **Criterio de Verificación:**
+  - Aprobación automatizada en tests de que ningún NPC quedó posicionado dentro de una roca, carpa o árbol sólido.
+
+---
+
+#### `[T-09]` Smoke Test y Validación Global de Integración
+* **Agente:** `Agent-Core-Performance`
+* **Archivos Objetivo:**
+  * Integración general de `lab_v2/`
+* **Dependencias:** `[T-01]` hasta `[T-08]` concluidas.
+* **Instrucciones Técnicas:**
+  1. Ejecutar la suite completa de pruebas del repositorio:
+     ```powershell
+     python lab_v2\run_tests.py
      ```
-     La tupla precalcula `(self.personaje[0], self.personaje[1] + paso_y)` con el valor inicial de X. En la primera iteración (eje X), `self.personaje` se actualiza con `nx = x + paso_x`. En la segunda iteración (eje Y), al cumplirse la condición, `self.personaje[:] = [nx, ny]` reemplaza el vector completo reescribiendo la posición X con el valor viejo anterior al movimiento. ¡El avance horizontal se anula por completo en cualquier movimiento diagonal!
-   * **Falta de deslizamiento contra obstáculos (*Wall Sliding*):** Si hay un obstáculo en una esquina o diagonal, el personaje se frena en seco en lugar de continuar deslizándose por el eje libre.
-   * **Gestión de teclas frágil:** `self.teclas` almacena eventos sueltos de `KEYDOWN`/`KEYUP`. Si la ventana pierde el foco o se acumula repetición de eventos, las teclas quedan pegadas o el personaje se congela.
+  2. Verificar que las 248+ pruebas del proyecto se ejecuten y finalicen exitosamente sin regresiones en las pantallas del laberinto ni en el campamento.
+  3. Ejecutar arranque del juego en modo interactivo:
+     ```powershell
+     python lab_v2\main.py
+     ```
+     - Comprobar spawn en `(550, 560)`.
+     - Caminar rodeando la hoguera libremente.
+     - Interactuar con Mara, Nela, Ivo y Tizón.
+     - Abrir el portón del Umbral y verificar transición a la pantalla de Niveles.
+* **Criterio de Verificación:**
+  - Salida de `run_tests.py`: `Ran 248+ tests ... OK`.
+  - Cero congelamientos, cero atascos en el vacío y transiciones limpias.
 
 ---
 
-## 2. Matriz Estricta de Asignación de Archivos (Zero-Conflict)
+## 4. Guía de Ejecución y Comandos de Referencia
 
-Para permitir que los 3 agentes trabajen **en paralelo sin riesgo de conflictos de git o sobrescrituras**, se establece una separación estricta y disjunta de archivos:
-
-$$\text{Archivos}(\text{Agente 1}) \cap \text{Archivos}(\text{Agente 2}) = \emptyset$$
-
-| Agente | Rol | Archivos Permitidos (Escritura / Modificación) | Archivos Prohibidos |
-| :--- | :--- | :--- | :--- |
-| **Agente 1** | Entorno, Mapas y Colisiones | • `lab_v2/interfaz/colisiones_campamento.py` *(nuevo)*<br>• `lab_v2/interfaz/ambiente.py`<br>• `lab_v2/interfaz/arte_pixel.py`<br>• `lab_v2/pruebas/test_colisiones_campamento.py` *(nuevo)* | **PROHIBIDO tocar:**<br>• `lab_v2/interfaz/pantallas.py`<br>• `lab_v2/interfaz/controlador_campamento.py`<br>• Cualquier archivo de `juego/` |
-| **Agente 2** | Movimiento y Controlador | • `lab_v2/interfaz/controlador_campamento.py` *(nuevo)*<br>• `lab_v2/interfaz/pantallas.py`<br>• `lab_v2/pruebas/test_controlador_campamento.py` *(nuevo)* | **PROHIBIDO tocar:**<br>• `lab_v2/interfaz/colisiones_campamento.py`<br>• `lab_v2/interfaz/ambiente.py`<br>• `lab_v2/interfaz/arte_pixel.py`<br>• Cualquier archivo de `juego/` |
-| **Agente 3** | Auditoría General (Solo Lectura) | • `AUDIT_CAMPAMENTO.md` *(nuevo, único archivo permitido)* | **MODO SOLO LECTURA:**<br>Prohibido modificar cualquier archivo existente del código fuente del juego. |
-
----
-
-## 3. Contrato de Interfaz entre Agente 1 y Agente 2
-
-Para garantizar la interoperabilidad sin acoplamiento directo durante el desarrollo en paralelo, se define el siguiente contrato que ambos agentes deben respetar:
-
-### Módulo: `lab_v2/interfaz/colisiones_campamento.py` (Creado por Agente 1)
-```python
-import pygame
-
-def obtener_limites_campamento() -> tuple[int, int, int, int]:
-    """
-    Devuelve los límites transitables del claro del campamento:
-    (min_x, min_y, max_x, max_y)
-    Elimina la barrera artificial en y=244 para permitir transitar
-    la zona norte natural del claro (ej. min_y ≈ 140-150).
-    """
-    ...
-
-def obtener_bloqueos_campamento(porton_rect: pygame.Rect = None) -> list[pygame.Rect]:
-    """
-    Devuelve la lista de cajas de colisión (pygame.Rect) ajustadas
-    con precisión a los objetos visibles (hoguera reducida, carpas,
-    hamaca, carro, portón y NPCs), sin colisionadores fantasma.
-    """
-    ...
-
-def es_posicion_valida(caja: pygame.Rect, bloqueos: list[pygame.Rect], limites: tuple[int, int, int, int]) -> bool:
-    """
-    Verifica si una caja colisiona con algún bloqueo o sale de los límites.
-    """
-    ...
+### Ejecución de Pruebas Específicas del Campamento
+```powershell
+python -m unittest lab_v2\pruebas\test_colisiones_campamento.py -v
 ```
 
-### Integración en `pantallas.py` y `controlador_campamento.py` (Implementado por Agente 2)
-El Agente 2 importará y utilizará estas funciones con manejo defensivo para pruebas unitarias desacopladas:
-```python
-try:
-    from interfaz.colisiones_campamento import (
-        obtener_bloqueos_campamento,
-        obtener_limites_campamento,
-        es_posicion_valida
-    )
-except ImportError:
-    # Fallback defensivo mientras Agente 1 finaliza su módulo
-    ...
-```
-
----
-
-## 4. Tareas Específicas y Prompts de Inicio
-
----
-
-### AGENTE 1: Entorno, Mapas y Colisiones del Campamento
-
-* **Objetivo:**
-  Crear el módulo especializado de colisiones del campamento `colisiones_campamento.py`, recalibrando todos los obstáculos (`bloqueos`) y límites del escenario para que coincidan con la estética visual del Claro de Ceniza, eliminando obstáculos invisibles, sobredimensionados o desalineados.
-* **Archivos Asignados (Exclusivos):**
-  1. `lab_v2/interfaz/colisiones_campamento.py` *(creación)*
-  2. `lab_v2/interfaz/ambiente.py` *(revisión/ajuste de hoguera y niebla si aplica)*
-  3. `lab_v2/interfaz/arte_pixel.py` *(coordinación de proporciones de fondo)*
-  4. `lab_v2/pruebas/test_colisiones_campamento.py` *(creación de pruebas unitarias)*
-* **Restricción Estricta:**
-  NO modifiques bajo ninguna circunstancia `lab_v2/interfaz/pantallas.py` ni `lab_v2/interfaz/controlador_campamento.py`.
-* **Criterios de Aceptación:**
-  - La caja de la hoguera en `(550, 478)` ya no bloquea 192x97 px de espacio vacío a los costados; se ajusta al fuego real (radio ≈ 30-40 px).
-  - El límite superior transitable ya no está clavado en `y = 244`, permitiendo caminar naturalmente hacia la parte superior del claro (respetando los pinos y la cerca).
-  - El portón del Umbral permite acercarse a interactuar sin rebotar prematuramente.
-  - Carpas, mesas, carro y hamaca tienen colisionadores proporcionales a su dibujo.
-  - El archivo `lab_v2/pruebas/test_colisiones_campamento.py` valida todas las hitboxes y límites sin errores.
-
-#### Prompt para Agente 1 (Copiar y pegar):
-```text
-Hola Agente 1. Eres el especialista en Entorno, Mapas y Colisiones del Campamento.
-Tu misión exclusiva es corregir el bug donde el personaje se atasca en la nada en el campamento debido a colisionadores invisibles y límites del mapa desalineados.
-
-TUS ARCHIVOS PERMITIDOS (EXCLUSIVOS):
-- lab_v2/interfaz/colisiones_campamento.py (crear este módulo)
-- lab_v2/interfaz/ambiente.py
-- lab_v2/interfaz/arte_pixel.py
-- lab_v2/pruebas/test_colisiones_campamento.py (crear pruebas de colisión)
-
-REGLAS ESTRICTAS DE CONFLICTO:
-- NO modifiques lab_v2/interfaz/pantallas.py (ese archivo es propiedad exclusiva del Agente 2).
-- NO modifiques ningún archivo de lógica de juego (juego/).
-
-TAREAS:
-1. Crea lab_v2/interfaz/colisiones_campamento.py implementando:
-   - obtener_limites_campamento() -> tuple[int, int, int, int]: Ajusta los límites reales transitables del Claro de Ceniza (amplía el límite norte que estaba artificialmente bloqueado en y=244 para que el jugador pueda recorrer la zona superior cerca del portón).
-   - obtener_bloqueos_campamento(porton_rect=None) -> list[pygame.Rect]: Corrige las cajas de colisión. Especialmente:
-     * Reduce la caja gigante de la hoguera (que medía 192x97 px para un fuego circular pequeño en (550, 478)) a una dimensión precisa y transitable por los costados.
-     * Ajusta el portón del Umbral para que el personaje pueda acercarse a la puerta a interactuar sin chocar a 100px de distancia.
-     * Calibra las cajas de colisión de las tiendas de campaña, la hamaca, el carro y los NPCs (Mara, Ivo, Nela y Tizón).
-   - es_posicion_valida(caja, bloqueos, limites) -> bool: Función utilitaria para evaluar colisiones.
-2. Revisa ambiente.py y arte_pixel.py para asegurar que la posición visual de los emisores (humo, fuego) y fondos coincidan con los nuevos límites y colisionadores.
-3. Crea lab_v2/pruebas/test_colisiones_campamento.py con tests exhaustivos en unittest que verifiquen que:
-   - Los límites amplían la libertad de movimiento.
-   - Ningún collider sobredimensionado bloquea caminos obvios.
-   - Las funciones devuelven objetos pygame.Rect válidos y consistentes.
-4. Ejecuta las pruebas y confirma que pasen al 100%.
-```
-
----
-
-### AGENTE 2: Movimiento y Controlador del Jugador
-
-* **Objetivo:**
-  Crear el controlador de movimiento y físicas fluidas del personaje en el campamento (`controlador_campamento.py`) e integrarlo en `pantallas.py`. Resolver el error crítico de movimiento diagonal (sobreescritura del vector X), agregar deslizamiento contra muros (*wall sliding*) y mejorar la captura reactiva de teclas.
-* **Archivos Asignados (Exclusivos):**
-  1. `lab_v2/interfaz/controlador_campamento.py` *(creación)*
-  2. `lab_v2/interfaz/pantallas.py` *(modificación exclusiva de la clase Campamento para integrar el nuevo controlador)*
-  3. `lab_v2/pruebas/test_controlador_campamento.py` *(creación de pruebas unitarias)*
-* **Restricción Estricta:**
-  NO modifiques bajo ninguna circunstancia `lab_v2/interfaz/colisiones_campamento.py`, `lab_v2/interfaz/ambiente.py` ni `lab_v2/interfaz/arte_pixel.py`.
-* **Criterios de Aceptación:**
-  - El movimiento diagonal (WASD y flechas) funciona a velocidad normalizada constante sin que el avance horizontal se borre.
-  - El personaje se desliza suavemente sobre obstáculos y paredes (*wall sliding* independiente en X e Y): si choca horizontalmente, sigue avanzando verticalmente y viceversa.
-  - La captura de teclas responde de forma inmediata y no sufre de teclas atascadas o canceladas erróneamente.
-  - Se integra de forma limpia en `Campamento.evento` y `Campamento.actualizar` en `pantallas.py`, utilizando el contrato con `interfaz.colisiones_campamento` (con fallback de seguridad).
-  - El archivo `lab_v2/pruebas/test_controlador_campamento.py` y las pruebas preexistentes en `lab_v2/run_tests.py` pasan exitosamente.
-
-#### Prompt para Agente 2 (Copiar y pegar):
-```text
-Hola Agente 2. Eres el especialista en Movimiento y Controlador del Jugador en el Campamento.
-Tu misión exclusiva es corregir la física y la lógica de movimiento del personaje en el campamento para que el desplazamiento sea fluido, responsivo y sin bloqueos extraños.
-
-TUS ARCHIVOS PERMITIDOS (EXCLUSIVOS):
-- lab_v2/interfaz/controlador_campamento.py (crear este módulo)
-- lab_v2/interfaz/pantallas.py (editar exclusivamente la clase Campamento para integrar el controlador)
-- lab_v2/pruebas/test_controlador_campamento.py (crear pruebas del controlador)
-
-REGLAS ESTRICTAS DE CONFLICTO:
-- NO modifiques lab_v2/interfaz/colisiones_campamento.py, ambiente.py ni arte_pixel.py (propiedad exclusiva del Agente 1).
-- Importa las colisiones desde `interfaz.colisiones_campamento` usando el contrato:
-  obtener_bloqueos_campamento(porton_rect) y obtener_limites_campamento(), con fallback defensivo por si el archivo está siendo creado en paralelo.
-
-TAREAS:
-1. Crea lab_v2/interfaz/controlador_campamento.py:
-   - Implementa una clase ControladorCampamento que gestione:
-     * Detección de teclas (WASD / flechas) de forma sólida, sin atascamientos de eventos.
-     * Normalización de vector (evitar que en diagonal se mueva a mayor velocidad o se distorsione).
-     * Físicas con deslizamiento en paredes (Wall Sliding): evalúa paso_x y paso_y por separado; si un eje colisiona pero el otro está libre, el personaje debe continuar avanzando suavemente en el eje libre.
-     * Hitbox del personaje: caja de tamaño apropiado con redondeo subpíxel suave.
-     * Retorno de posición actualizada, dirección cardinal ("arriba", "abajo", "izquierda", "derecha") y estado andante (bool).
-2. Modifica la clase Campamento en lab_v2/interfaz/pantallas.py:
-   - Reemplaza el bucle for nx, ny in ((self.personaje[0] + paso_x, ...), ...) que causaba el bug de sobreescritura diagonal.
-   - Instancia y delega el movimiento y la gestión de entrada en ControladorCampamento.
-   - Reemplaza self.bloqueos fijos por la llamada a obtener_bloqueos_campamento(self.porton) y los límites por obtener_limites_campamento().
-3. Crea lab_v2/pruebas/test_controlador_campamento.py:
-   - Verifica que el movimiento diagonal actualice tanto X como Y simultáneamente.
-   - Verifica el deslizamiento en muros ante colisión en un solo eje.
-   - Verifica que la velocidad se mantenga uniforme en todas las direcciones.
-4. Ejecuta las pruebas con python lab_v2/run_tests.py y asegura que todas pasen.
-```
-
----
-
-### AGENTE 3: Auditoría General del Campamento (Solo Lectura)
-
-* **Objetivo:**
-  Auditar de forma integral todos los componentes del Campamento (interfaz, cámara, HUD, diálogos, sonidos, transiciones entre pantallas y persistencia) para detectar cualquier otro defecto de lógica, inconsistencia gráfica o fuga de rendimiento.
-* **Archivos Asignados (Exclusivos):**
-  1. `AUDIT_CAMPAMENTO.md` *(creación; único archivo que tiene permitido escribir)*
-* **Restricción Estricta:**
-  MODO SOLO LECTURA. No modifiques ningún archivo de código (`.py`) existente en el repositorio.
-* **Áreas Obligatorias de Auditoría:**
-  1. **HUD e Interacción:** Visualización de mensajes temporales (`self.mensaje_tiempo`), formato de textos y etiquetas de sobrevivientes (Mara, Ivo, Nela, Tizón).
-  2. **Ciclo de Guardado:** Persistencia del checkpoint (`checkpoint.json`), actualización de coordenadas, fragmentos y pistas en `App`.
-  3. **Transiciones de Pantalla:** Flujo de entrada/salida entre `Menu`, `Campamento`, `Niveles`, `Juego`, `Victoria` y `Derrota`.
-  4. **Efectos y Audio:** Reproducción de sonidos ("clic", "guardar", "pared"), comportamiento con modo efectos BAJO/ALTO en `AmbienteRefugio`.
-  5. **Manejo de Excepciones y Casos Borde:** Redimensionado de ventana (`RESIZABLE`), teclas rápidas (`Esc`, `L`, `E`) y pérdida de foco.
-
-#### Prompt para Agente 3 (Copiar y pegar):
-```text
-Hola Agente 3. Eres el Auditor de Calidad y Estabilidad del Campamento.
-Tu misión es realizar una auditoría exhaustiva de solo lectura sobre todos los módulos del campamento en el juego para detectar bugs secundarios, problemas de rendimiento o inconsistencias de interfaz.
-
-REGLA ESTRICTA DE SOLO LECTURA:
-- NO modifiques ningún archivo de código fuente (.py) existente.
-- Toda tu salida, análisis y recomendaciones deben quedar registrados exclusivamente en un archivo nuevo en la raíz del proyecto llamado: AUDIT_CAMPAMENTO.md.
-
-MÓDULOS A REVISAR:
-- lab_v2/interfaz/pantallas.py (secciones Campamento, Menu, Niveles)
-- lab_v2/interfaz/app.py (guardado de checkpoint, transiciones, aviso_guardado)
-- lab_v2/interfaz/ambiente.py (humo, luciérnagas, niebla, viñeta, ajuste de FPS)
-- lab_v2/interfaz/arte_pixel.py (FondoRefugioPixel, pixelar_region)
-- lab_v2/interfaz/efectos.py (reproducción de audio y partículas)
-- lab_v2/interfaz/tema.py (colores, fuentes, dibujo de personajes)
-
-ESTRUCTURA DE AUDIT_CAMPAMENTO.md:
-1. Resumen Ejecutivo del Estado del Campamento.
-2. Análisis Detallado por Área:
-   - HUD e Indicaciones en Pantalla.
-   - Interacciones con NPCs y Objetos (Tizón, Mara, Ivo, Nela, Umbral, armaduras).
-   - Persistencia y Checkpoints (coordenadas, fragmentos, pistas, permisos de disco).
-   - Transición de Pantallas y Ciclo de Vida (manejo de memoria, superficies).
-   - Rendimiento Gráfico y Efectos Atmosféricos (calidad alta vs baja).
-   - Audio y Efectos Sonoros.
-3. Tabla de Hallazgos y Vulnerabilidades (clasificadas por Severidad: Crítica, Alta, Media, Baja).
-4. Recomendaciones de Mejora y Buenas Prácticas para el equipo.
-```
-
----
-
-## 5. Verificación Final e Integración
-
-Una vez que los tres agentes concluyan sus tareas en paralelo, el ciclo de integración se valida ejecutando la suite completa de pruebas:
-
+### Ejecución de Suite Global
 ```powershell
 python lab_v2\run_tests.py
 ```
 
-Y verificando manualmente la jugabilidad en el campamento:
+### Lanzamiento del Juego
 ```powershell
 python lab_v2\main.py
 ```
-*(Caminar con WASD en todas las direcciones, probar diagonales junto a la fogata, rodear las tiendas y aproximarse al Umbral sin atascos).*

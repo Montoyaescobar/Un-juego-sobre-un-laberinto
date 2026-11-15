@@ -50,13 +50,13 @@ class AmbienteLaberinto:
         self.fases = [azar.uniform(0, math.tau) for _ in self.fuentes]
         cantidad = max(12, min(48, self.rect.w * self.rect.h // 9000))
         self.polvo = [[azar.uniform(self.rect.left, self.rect.right),
-                       azar.uniform(self.rect.top, self.rect.bottom),
-                       azar.uniform(-5, 5), azar.uniform(-4, 2), azar.uniform(0, math.tau)]
-                      for _ in range(cantidad)]
+                    azar.uniform(self.rect.top, self.rect.bottom),
+                    azar.uniform(-5, 5), azar.uniform(-4, 2), azar.uniform(0, math.tau)]
+                    for _ in range(cantidad)]
         self.brasas = []                 # cada una: [x, y, vx, vy, vida]
         self._acum = [0.0] * len(self.fuentes)
         self.bandas = [[azar.uniform(0, 1), azar.uniform(0.15, 0.85), azar.uniform(0.6, 1.4)]
-                       for _ in range(3)]
+                    for _ in range(3)]
         self._niebla = self._crear_niebla(paleta["niebla"])
 
     # ---------------- preparación (se hace una sola vez) ----------------
@@ -205,7 +205,7 @@ class AmbienteLaberinto:
         for x, y, _, _, fase in self.polvo:
             b = 0.5 + 0.5 * math.sin(self.t * 1.3 + fase)
             pygame.draw.rect(surf, mezclar(base, self.paleta["polvo"], 0.25 + 0.5 * b),
-                             (int(x), int(y), 2, 2))
+                            (int(x), int(y), 2, 2))
 
     def dibujar_luces(self, surf):
         """
@@ -227,5 +227,5 @@ class AmbienteLaberinto:
             for x, y, _, _, vida in self.brasas:
                 k = max(0.0, min(1.0, vida / 0.5))
                 pygame.draw.rect(surf, mezclar((60, 20, 8), self.paleta["luz"], k),
-                                 (int(x), int(y), 2, 2))
+                                (int(x), int(y), 2, 2))
         surf.set_clip(previo)

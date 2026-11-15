@@ -454,14 +454,26 @@ class Campamento(Pantalla):
         self.andando = False
         self.antorcha = app.antorcha_encendida
         self.fondo_pixel = FondoRefugioPixel()
-        self.ambiente = AmbienteRefugio(ANCHO, ALTO)      # humo, luciérnagas, niebla y luz
+        self.fuego_pos = (550, 366) if getattr(self.fondo_pixel, "usa_imagen", False) else (550, 478)
+        self.ambiente = AmbienteRefugio(ANCHO, ALTO, fuego=self.fuego_pos)      # humo, luciérnagas, niebla y luz
         self.app.guardar_checkpoint(self.personaje)
         self.abriendo = False
         self.porton_anim = 0.0
         self.mensaje = "La puerta vuelve a abrirse al anochecer."
         self.mensaje_tiempo = 4.0
         self.particulas = Particulas()
-        self.duende = (803, 363)
+        if getattr(self.fondo_pixel, "usa_imagen", False):
+            self.pos_mara = (295, 485)
+            self.pos_ivo = (725, 440)
+            self.pos_nela = (370, 560)
+            self.duende = (655, 545)
+            self.umbral_pos = (550, 210)
+        else:
+            self.pos_mara = (370, 443)
+            self.pos_ivo = (735, 526)
+            self.pos_nela = (302, 558)
+            self.duende = (803, 363)
+            self.umbral_pos = (550, 294)
         self.armaduras = [{"x": 398, "y": 344, "estado": "quieta", "tiempo": 0.0,
                            "activada": False},
                           {"x": 702, "y": 344, "estado": "quieta", "tiempo": 0.0,
@@ -517,19 +529,19 @@ class Campamento(Pantalla):
     def _interactuar(self):
         """Reacciona a E según el objeto más cercano: abre el Umbral, habla con los sobrevivientes, intercambia fragmentos con Tizón o describe el entorno. Recibe/devuelve: nada."""
         x, y = self.personaje
-        if math.hypot(x - 550, y - 294) < 135:
+        if math.hypot(x - self.umbral_pos[0], y - self.umbral_pos[1]) < 135:
             self.app.sonidos.reproducir("clic")
             self.app.guardar_checkpoint(self.personaje)
             self.abriendo = True
             self.mensaje = "El Umbral se está abriendo..."
             self.mensaje_tiempo = 0
-        elif math.hypot(x - 370, y - 443) < 72:
+        elif math.hypot(x - self.pos_mara[0], y - self.pos_mara[1]) < 78:
             self.mensaje = "Mara: la marca de tiza señala dónde volver si una placa despierta."
             self.mensaje_tiempo = 4.5
-        elif math.hypot(x - 735, y - 526) < 72:
+        elif math.hypot(x - self.pos_ivo[0], y - self.pos_ivo[1]) < 78:
             self.mensaje = "Ivo: cuando la puerta rechina, algo se mueve al otro lado."
             self.mensaje_tiempo = 4.5
-        elif math.hypot(x - 302, y - 558) < 72:
+        elif math.hypot(x - self.pos_nela[0], y - self.pos_nela[1]) < 78:
             self.mensaje = "Nela: vuelve con vida. La hoguera no puede esperar para siempre."
             self.mensaje_tiempo = 4.5
         elif math.hypot(x - 266, y - 356) < 120:
@@ -538,7 +550,7 @@ class Campamento(Pantalla):
         elif math.hypot(x - 894, y - 536) < 130:
             self.mensaje = "El mapa tiene rutas tachadas y una marca nueva bajo el bosque."
             self.mensaje_tiempo = 4.5
-        elif math.hypot(x - 550, y - 478) < 125:
+        elif math.hypot(x - self.fuego_pos[0], y - self.fuego_pos[1]) < 125:
             self.mensaje = "La hoguera mantiene a raya la niebla, por ahora."
             self.mensaje_tiempo = 4.5
         elif math.hypot(x - 138, y - 599) < 110:
@@ -606,7 +618,8 @@ class Campamento(Pantalla):
         if self.mensaje_tiempo > 0:
             self.mensaje_tiempo -= dt
         if random.random() < dt * 5:
-            self.particulas.emitir(550 + random.uniform(-20, 20), 468, ORO, 2, 26, 1.1, 2, -16)
+            self.particulas.emitir(self.fuego_pos[0] + random.uniform(-20, 20),
+                                   self.fuego_pos[1] - 10, ORO, 2, 26, 1.1, 2, -16)
         self.particulas.actualizar(dt)
         self.ambiente.actualizar(dt, self.app.efectos > 0)
 
@@ -793,49 +806,65 @@ class Campamento(Pantalla):
         """Dibuja todo el campamento (fondo, objetos, personajes, pixelado) y encima el HUD con las indicaciones. Recibe: surf. Devuelve: nada."""
         self._etiquetas = []          # rótulos de personajes: se pintan DESPUÉS del pixelado
         self.fondo_pixel.dibujar(surf, self.t)
-        pygame.draw.ellipse(surf, (26, 34, 18), (50, 138, 1000, 650))
-        pygame.draw.ellipse(surf, (69, 62, 39), (68, 150, 965, 616), 2)
-        pygame.draw.polygon(surf, (48, 43, 28), [(469, 270), (631, 270), (714, 720), (389, 720)])
-        pygame.draw.ellipse(surf, (68, 57, 35), (478, 270, 144, 310), 2)
-        for arbol in sorted(self.arboles, key=lambda a: a[1]):
-            self._dibujar_arbol(surf, arbol)
+        usa_img = getattr(self.fondo_pixel, "usa_imagen", False)
+        if not usa_img:
+            pygame.draw.ellipse(surf, (26, 34, 18), (50, 138, 1000, 650))
+            pygame.draw.ellipse(surf, (69, 62, 39), (68, 150, 965, 616), 2)
+            pygame.draw.polygon(surf, (48, 43, 28), [(469, 270), (631, 270), (714, 720), (389, 720)])
+            pygame.draw.ellipse(surf, (68, 57, 35), (478, 270, 144, 310), 2)
+            for arbol in sorted(self.arboles, key=lambda a: a[1]):
+                self._dibujar_arbol(surf, arbol)
 
-        self._dibujar_cementerio(surf)
-        self._dibujar_porton(surf)
-        for armadura in self.armaduras:
-            self._dibujar_armadura(surf, armadura)
-        # Refugios y objetos cotidianos del campamento.
-        pygame.draw.polygon(surf, (68, 45, 31), [(94, 519), (177, 455), (260, 519)])
-        pygame.draw.polygon(surf, (104, 76, 48), [(110, 514), (177, 468), (244, 514)])
-        pygame.draw.rect(surf, (39, 31, 23), (143, 514, 69, 50))
-        pygame.draw.rect(surf, (86, 62, 38), (143, 514, 69, 50), 2)
-        pygame.draw.polygon(surf, (65, 57, 37), [(852, 459), (927, 405), (1000, 459)])
-        pygame.draw.polygon(surf, (99, 84, 48), [(868, 454), (927, 418), (984, 454)])
-        pygame.draw.rect(surf, (33, 31, 23), (896, 454, 63, 53))
-        self._dibujar_hamaca(surf)
-        self._dibujar_carro(surf)
-        # Barriles, suministros y mapa clavado sobre una mesa.
-        pygame.draw.rect(surf, (84, 59, 35), (830, 533, 54, 51))
-        pygame.draw.rect(surf, (137, 102, 55), (830, 533, 54, 51), 2)
-        pygame.draw.line(surf, (45, 36, 25), (832, 548), (882, 548), 3)
-        pygame.draw.ellipse(surf, (91, 65, 38), (948, 536, 30, 42))
-        pygame.draw.ellipse(surf, (140, 106, 58), (948, 536, 30, 12))
-        pygame.draw.line(surf, (98, 75, 47), (850, 606), (975, 606), 8)
-        pygame.draw.line(surf, (98, 75, 47), (862, 603), (862, 628), 5)
-        pygame.draw.line(surf, (98, 75, 47), (963, 603), (963, 628), 5)
-        pygame.draw.rect(surf, (162, 145, 93), (865, 580, 92, 34))
-        pygame.draw.line(surf, (82, 78, 50), (877, 590), (936, 590), 1)
-        pygame.draw.line(surf, (151, 62, 42), (903, 584), (922, 606), 2)
+            self._dibujar_cementerio(surf)
+            self._dibujar_porton(surf)
+            for armadura in self.armaduras:
+                self._dibujar_armadura(surf, armadura)
+            # Refugios y objetos cotidianos del campamento.
+            pygame.draw.polygon(surf, (68, 45, 31), [(94, 519), (177, 455), (260, 519)])
+            pygame.draw.polygon(surf, (104, 76, 48), [(110, 514), (177, 468), (244, 514)])
+            pygame.draw.rect(surf, (39, 31, 23), (143, 514, 69, 50))
+            pygame.draw.rect(surf, (86, 62, 38), (143, 514, 69, 50), 2)
+            pygame.draw.polygon(surf, (65, 57, 37), [(852, 459), (927, 405), (1000, 459)])
+            pygame.draw.polygon(surf, (99, 84, 48), [(868, 454), (927, 418), (984, 454)])
+            pygame.draw.rect(surf, (33, 31, 23), (896, 454, 63, 53))
+            self._dibujar_hamaca(surf)
+            self._dibujar_carro(surf)
+            # Barriles, suministros y mapa clavado sobre una mesa.
+            pygame.draw.rect(surf, (84, 59, 35), (830, 533, 54, 51))
+            pygame.draw.rect(surf, (137, 102, 55), (830, 533, 54, 51), 2)
+            pygame.draw.line(surf, (45, 36, 25), (832, 548), (882, 548), 3)
+            pygame.draw.ellipse(surf, (91, 65, 38), (948, 536, 30, 42))
+            pygame.draw.ellipse(surf, (140, 106, 58), (948, 536, 30, 12))
+            pygame.draw.line(surf, (98, 75, 47), (850, 606), (975, 606), 8)
+            pygame.draw.line(surf, (98, 75, 47), (862, 603), (862, 628), 5)
+            pygame.draw.line(surf, (98, 75, 47), (963, 603), (963, 628), 5)
+            pygame.draw.rect(surf, (162, 145, 93), (865, 580, 92, 34))
+            pygame.draw.line(surf, (82, 78, 50), (877, 590), (936, 590), 1)
+            pygame.draw.line(surf, (151, 62, 42), (903, 584), (922, 606), 2)
+            self._dibujar_hoguera(surf)
+        else:
+            if self.porton_anim > 0:
+                brillo(surf, (self.umbral_pos[0], 125), int(40 + self.porton_anim * 110), ORO,
+                       0.15 + self.porton_anim * 0.35)
+                abertura = int(4 + self.porton_anim * 50)
+                pygame.draw.rect(surf, (225, 182, 94), (self.umbral_pos[0] - abertura // 2, 60,
+                                                         max(2, abertura), 120))
+            # Llama viva en la fogata central
+            cx, cy = self.fuego_pos
+            pulso = math.sin(self.t * 9)
+            pygame.draw.polygon(surf, (203, 80, 31), [(cx - 14, cy + 8), (cx - 7, cy - 20 - pulso * 3),
+                                                      (cx - 2, cy + 4), (cx + 4, cy - 26 + pulso * 2), (cx + 15, cy + 9)])
+            pygame.draw.polygon(surf, (244, 163, 58), [(cx - 8, cy + 8), (cx - 2, cy - 8 - pulso * 2),
+                                                      (cx + 2, cy), (cx + 6, cy - 14 + pulso * 2), (cx + 10, cy + 8)])
 
         self.ambiente.dibujar_luz(surf)
         self.ambiente.dibujar_niebla(surf)
-        self._dibujar_hoguera(surf)
         self.particulas.dibujar(surf)
         self.ambiente.dibujar_chispas(surf)
         self.ambiente.dibujar_humo(surf)
-        self._dibujar_sobreviviente(surf, 370, 443, "MARA · CARTÓGRAFA", (134, 112, 65))
-        self._dibujar_sobreviviente(surf, 735, 526, "IVO · VIGÍA", (100, 113, 68))
-        self._dibujar_sobreviviente(surf, 302, 558, "NELA · CURANDERA", (132, 72, 52))
+        self._dibujar_sobreviviente(surf, self.pos_mara[0], self.pos_mara[1], "MARA · CARTÓGRAFA", (134, 112, 65))
+        self._dibujar_sobreviviente(surf, self.pos_ivo[0], self.pos_ivo[1], "IVO · VIGÍA", (100, 113, 68))
+        self._dibujar_sobreviviente(surf, self.pos_nela[0], self.pos_nela[1], "NELA · CURANDERA", (132, 72, 52))
         self._dibujar_duende(surf)
         dibujar_jugador(surf, self.personaje[0], self.personaje[1], 48, self.t,
                         self.antorcha, self.direccion, self.andando)
@@ -856,7 +885,7 @@ class Campamento(Pantalla):
               (self.app.fragmentos_mapa, self.app.pistas_duende), 13, ORO,
               (47, 108), sombra=False)
 
-        cerca_porton = math.hypot(self.personaje[0] - 550, self.personaje[1] - 294) < 135
+        cerca_porton = math.hypot(self.personaje[0] - self.umbral_pos[0], self.personaje[1] - self.umbral_pos[1]) < 135
         cerca_duende = math.hypot(self.personaje[0] - self.duende[0],
                                   self.personaje[1] - self.duende[1]) < 85
         indicacion = "E  ·  ABRIR EL UMBRAL" if cerca_porton else \

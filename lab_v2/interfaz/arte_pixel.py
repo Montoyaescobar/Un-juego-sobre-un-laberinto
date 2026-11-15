@@ -2,6 +2,7 @@
 
 import math
 import random
+from pathlib import Path
 
 import pygame
 
@@ -184,47 +185,77 @@ class EscenaMenuPixel:
 
 
 class FondoRefugioPixel:
-    """Bosque nocturno con pinos y una fortaleza distante para el campamento explorable."""
+    """Fondo para el campamento explorable: carga LobbyWalppaper.jpg o genera fondo procedural de respaldo."""
 
-    TAM = (550, 360)
+    TAM = (1100, 720)
 
     def __init__(self):
-        """Pinta una sola vez el cielo, la luna, las montañas y la fortaleza lejana del refugio. Recibe: nada. Devuelve: nada (constructor)."""
-        self.base = pygame.Surface(self.TAM)
-        for y in range(360):
-            k = y / 360
-            pygame.draw.line(self.base, (int(22 - 16 * k), int(40 - 29 * k), int(52 - 37 * k)),
-                             (0, y), (549, y))
-        pygame.draw.circle(self.base, (53, 78, 85), (275, 61), 38)
-        pygame.draw.circle(self.base, (127, 143, 127), (275, 61), 24)
-        pygame.draw.rect(self.base, (127, 143, 127), (256, 48, 39, 27))
-        pygame.draw.polygon(self.base, (21, 34, 43), [(0, 172), (82, 111), (154, 171),
-                         (250, 117), (332, 168), (428, 107), (550, 171), (550, 270), (0, 270)])
-        # Fortaleza del horizonte: solo se ve la silueta detrás del portón.
-        pygame.draw.rect(self.base, (15, 26, 36), (224, 99, 108, 85))
-        pygame.draw.rect(self.base, (15, 26, 36), (209, 121, 139, 67))
-        for x, y, w, h in ((218, 88, 24, 65), (254, 72, 25, 82), (294, 91, 24, 62)):
-            pygame.draw.rect(self.base, (15, 26, 36), (x, y, w, h))
-            pygame.draw.polygon(self.base, (15, 26, 36), [(x - 4, y), (x + w // 2, y - 17),
-                                                          (x + w + 4, y)])
-        for x, y in ((233, 123), (264, 114), (302, 126)):
-            pygame.draw.rect(self.base, (117, 91, 57), (x, y, 3, 8))
-        for x, y, h in ((16, 213, 140), (85, 225, 116), (162, 208, 145),
-                        (390, 216, 138), (470, 226, 118), (530, 202, 157)):
-            EscenaMenuPixel._pino(self.base, x, y, h, (12, 25, 29))
-        pygame.draw.rect(self.base, (12, 22, 25), (0, 266, 550, 94))
-        for x in range(16, 550, 33):
-            pygame.draw.rect(self.base, (20, 31, 31), (x, 284 + (x % 4) * 4, 17, 5))
+        """Carga la imagen de fondo de la lobby o genera el fondo procedural si no se encuentra."""
+        self.usa_imagen = False
+        self.base = None
+        rutas = [
+            Path(__file__).parent / "LobbyWalppaper.jpg",
+            Path(__file__).resolve().parent / "LobbyWalppaper.jpg",
+            Path(__file__).resolve().parents[1] / "LobbyWalppaper.jpg",
+            Path(__file__).resolve().parents[2] / "LobbyWalppaper.jpg",
+            Path("LobbyWalppaper.jpg"),
+            Path("lab_v2/interfaz/LobbyWalppaper.jpg"),
+        ]
+        for ruta in rutas:
+            if ruta.exists():
+                try:
+                    img = pygame.image.load(str(ruta))
+                    self.base = pygame.transform.scale(img, (1100, 720))
+                    self.usa_imagen = True
+                    break
+                except pygame.error:
+                    pass
+
+        if not self.usa_imagen:
+            self.TAM = (550, 360)
+            self.base = pygame.Surface(self.TAM)
+            for y in range(360):
+                k = y / 360
+                pygame.draw.line(self.base, (int(22 - 16 * k), int(40 - 29 * k), int(52 - 37 * k)),
+                                 (0, y), (549, y))
+            pygame.draw.circle(self.base, (53, 78, 85), (275, 61), 38)
+            pygame.draw.circle(self.base, (127, 143, 127), (275, 61), 24)
+            pygame.draw.rect(self.base, (127, 143, 127), (256, 48, 39, 27))
+            pygame.draw.polygon(self.base, (21, 34, 43), [(0, 172), (82, 111), (154, 171),
+                             (250, 117), (332, 168), (428, 107), (550, 171), (550, 270), (0, 270)])
+            # Fortaleza del horizonte: solo se ve la silueta detrás del portón.
+            pygame.draw.rect(self.base, (15, 26, 36), (224, 99, 108, 85))
+            pygame.draw.rect(self.base, (15, 26, 36), (209, 121, 139, 67))
+            for x, y, w, h in ((218, 88, 24, 65), (254, 72, 25, 82), (294, 91, 24, 62)):
+                pygame.draw.rect(self.base, (15, 26, 36), (x, y, w, h))
+                pygame.draw.polygon(self.base, (15, 26, 36), [(x - 4, y), (x + w // 2, y - 17),
+                                                              (x + w + 4, y)])
+            for x, y in ((233, 123), (264, 114), (302, 126)):
+                pygame.draw.rect(self.base, (117, 91, 57), (x, y, 3, 8))
+            for x, y, h in ((16, 213, 140), (85, 225, 116), (162, 208, 145),
+                            (390, 216, 138), (470, 226, 118), (530, 202, 157)):
+                EscenaMenuPixel._pino(self.base, x, y, h, (12, 25, 29))
+            pygame.draw.rect(self.base, (12, 22, 25), (0, 266, 550, 94))
+            for x in range(16, 550, 33):
+                pygame.draw.rect(self.base, (20, 31, 31), (x, 284 + (x % 4) * 4, 17, 5))
 
     def dibujar(self, surf, t):
         """Dibuja el fondo con bandas de niebla en movimiento. Recibe: surf y t (tiempo en segundos). Devuelve: nada."""
-        escena = self.base.copy()
-        velo = pygame.Surface(self.TAM, pygame.SRCALPHA)
-        for i in range(5):
-            x = int((t * (6 + i * 2) + i * 138) % 680) - 120
-            pygame.draw.rect(velo, (115, 137, 132, 16), (x, 210 + i * 21, 190, 5))
-        escena.blit(velo, (0, 0))
-        surf.blit(pygame.transform.scale(escena, surf.get_size()), (0, 0))
+        if self.usa_imagen and self.base is not None:
+            surf.blit(self.base, (0, 0))
+            velo = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+            for i in range(4):
+                x = int((t * (6 + i * 2) + i * 180) % (surf.get_width() + 240)) - 120
+                pygame.draw.rect(velo, (115, 137, 132, 12), (x, 180 + i * 40, 240, 8))
+            surf.blit(velo, (0, 0))
+        else:
+            escena = self.base.copy()
+            velo = pygame.Surface(self.TAM, pygame.SRCALPHA)
+            for i in range(5):
+                x = int((t * (6 + i * 2) + i * 138) % 680) - 120
+                pygame.draw.rect(velo, (115, 137, 132, 16), (x, 210 + i * 21, 190, 5))
+            escena.blit(velo, (0, 0))
+            surf.blit(pygame.transform.scale(escena, surf.get_size()), (0, 0))
 
 
 def pixelar_region(surf, rect, bloque=2):
