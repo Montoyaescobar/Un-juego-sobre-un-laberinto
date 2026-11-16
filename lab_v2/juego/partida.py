@@ -38,9 +38,9 @@ SIN_MOVIMIENTOS = "sin_movimientos"
 ATRAPADO = "atrapado"
 
 NIVELES = {
-    "1": {"nombre": "Fácil", "filas": 8, "columnas": 8, "factor": 3.0, "enemigos": 1, "base": 100, "eco": 8, "radar": 4},
-    "2": {"nombre": "Medio", "filas": 12, "columnas": 12, "factor": 2.5, "enemigos": 2, "base": 200, "eco": 6, "radar": 3},
-    "3": {"nombre": "Difícil", "filas": 16, "columnas": 16, "factor": 2.0, "enemigos": 3, "base": 300, "eco": 5, "radar": 2},
+    "1": {"nombre": "Fácil", "filas": 8, "columnas": 8, "factor": 3.0, "enemigos": 1, "base": 100, "eco": 8, "radar": 4, "intervalo_enemigo": 1.15, "rango_enemigo": 4},
+    "2": {"nombre": "Medio", "filas": 12, "columnas": 12, "factor": 2.5, "enemigos": 2, "base": 200, "eco": 6, "radar": 3, "intervalo_enemigo": 0.75, "rango_enemigo": 7},
+    "3": {"nombre": "Difícil", "filas": 16, "columnas": 16, "factor": 2.0, "enemigos": 3, "base": 300, "eco": 5, "radar": 2, "intervalo_enemigo": 0.48, "rango_enemigo": 12},
 }
 
 PUNTOS_POR_MOVIMIENTO_SOBRANTE = 10
@@ -216,12 +216,7 @@ class Partida:
             self.estado = ATRAPADO
             self.causa = "enemigo"
         else:
-            for enemigo in self.enemigos:
-                enemigo.avanzar()
-            if self._chocan():               # un enemigo caminó hacia el jugador
-                self.estado = ATRAPADO
-                self.causa = "enemigo"
-            elif self._eco_atrapa(anterior, esperando):
+            if self._eco_atrapa(anterior, esperando):
                 self.estado = ATRAPADO
                 self.causa = "eco"
             else:
@@ -229,6 +224,28 @@ class Partida:
                 if self.jugador.perdio():
                     self.estado = SIN_MOVIMIENTOS
         self._registrar()
+
+    def actualizar_tiempo(self, dt):
+        """
+        Avanza a los enemigos en tiempo real (independiente de los turnos del jugador).
+
+        Recibe:
+            dt: segundos transcurridos desde el último frame.
+        Devuelve:
+            True si algún enemigo atrapó al jugador en este llamado.
+        """
+        if self.estado != JUGANDO:
+            return False
+        se_movio = False
+        for enemigo in self.enemigos:
+            if enemigo.actualizar(dt, self.jugador.posicion, self.laberinto):
+                se_movio = True
+        if se_movio and self._chocan():
+            self.estado = ATRAPADO
+            self.causa = "enemigo"
+            self._registrar()
+            return True
+        return False
 
     def _radar_turno(self):
         """
@@ -316,7 +333,9 @@ class Partida:
             if camino is None or not 6 <= len(camino) - 1 <= 20:
                 continue
             if self._ruta_valida(camino, prohibidas):
-                enemigos.append(Enemigo(crear_ruta_patrulla(camino)))
+                enemigos.append(Enemigo(crear_ruta_patrulla(camino), self.nivel.get("nombre", "1"),
+                                      self.nivel.get("intervalo_enemigo", 1.0),
+                                      self.nivel.get("rango_enemigo", 4)))
         return enemigos
 
     def _ruta_valida(self, camino, prohibidas):

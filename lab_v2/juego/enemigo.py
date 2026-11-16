@@ -10,6 +10,7 @@ Cómo se usa la lista circular:
 """
 
 from estructuras.lista_circular import ListaCircular
+from juego.solver import camino_mas_corto
 
 
 def crear_ruta_patrulla(camino):
@@ -31,28 +32,75 @@ def crear_ruta_patrulla(camino):
 
 
 class Enemigo:
-    """Enemigo que recorre su ruta circular un paso por turno."""
+    """Enemigo autónomo en tiempo real: patrulla su ruta circular o persigue con BFS."""
 
-    def __init__(self, ruta):
+    def __init__(self, ruta, dificultad="1", intervalo_paso=1.0, rango_vision=4):
         """
         Crea el enemigo en la primera casilla de su ruta.
 
         Recibe:
             ruta: ListaCircular de casillas (ver crear_ruta_patrulla).
-        Devuelve:
-            Nada (constructor).
+            dificultad: identificador del nivel.
+            intervalo_paso: segundos entre pasos.
+            rango_vision: distancia (en pasos BFS) a la que empieza a perseguir.
         """
         self.ruta = ruta
+        self.dificultad = dificultad
+        self.intervalo_paso = intervalo_paso
+        self.rango_vision = rango_vision
+        self.tiempo_acumulado = 0.0
+        self.progreso_paso = 0.0
+        self.estado = "patrulla"
         self.ruta.reiniciar_cursor()
         self.posicion = self.ruta.avanzar()
+        self._objetivo_patrulla = self.posicion
+
+    def actualizar(self, dt, pos_jugador, laberinto):
+        """
+        Acumula tiempo y, al cumplirse el intervalo, da un paso.
+
+        Devuelve:
+            True si dio un paso en este frame.
+        """
+        self.tiempo_acumulado += dt
+        if self.intervalo_paso <= 0:
+            self.progreso_paso = 1.0
+        else:
+            self.progreso_paso = min(1.0, self.tiempo_acumulado / self.intervalo_paso)
+        if self.tiempo_acumulado < self.intervalo_paso:
+            return False
+        self.tiempo_acumulado -= self.intervalo_paso
+        if self.tiempo_acumulado >= self.intervalo_paso:   # evita ráfagas tras un dt enorme
+            self.tiempo_acumulado = 0.0
+        self.progreso_paso = 0.0
+
+        camino = camino_mas_corto(laberinto, self.posicion, pos_jugador)
+        if camino is not None and len(camino) - 1 <= self.rango_vision:
+            self.estado = "persecucion"
+            if len(camino) > 1:
+                self.posicion = camino[1]
+                return True
+            return False
+
+        self.estado = "patrulla"
+        if self.posicion == self._objetivo_patrulla:
+            self._objetivo_patrulla = self.ruta.avanzar()
+        if self.posicion == self._objetivo_patrulla:
+            return False
+        vuelta = camino_mas_corto(laberinto, self.posicion, self._objetivo_patrulla)
+        if vuelta is None or len(vuelta) < 2:
+            self.posicion = self._objetivo_patrulla
+        else:
+            self.posicion = vuelta[1]
+        return True
 
     def avanzar(self):
         """
-        Mueve al enemigo a la siguiente casilla de su ruta.
+        Mueve al enemigo a la siguiente casilla de su ruta (llamada forzada).
 
-        Recibe: nada.
         Devuelve:
             La nueva posición (fila, columna).
         """
         self.posicion = self.ruta.avanzar()
+        self._objetivo_patrulla = self.posicion
         return self.posicion

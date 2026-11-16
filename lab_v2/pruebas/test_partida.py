@@ -98,22 +98,25 @@ class TestPartida(unittest.TestCase):
         self.assertEqual(p.posiciones_enemigos(), antes)
         self.assertEqual(p.historial.total(), 1)
 
-    def test_deshacer_mueve_enemigos_y_registra(self):
-        # Esperado: deshacer cuenta como acción: enemigos avanzan y hay nueva foto
+    def test_deshacer_registra_foto_y_no_mueve_enemigos(self):
+        # Esperado: deshacer cuenta como acción y guarda foto, pero los enemigos son autónomos
         p = Partida(NIVELES["1"], semilla=4)
         p.mover(direccion(p.solucion[0], p.solucion[1]))
         antes = p.posiciones_enemigos()
         self.assertTrue(p.deshacer())
-        self.assertNotEqual(p.posiciones_enemigos(), antes)
+        self.assertEqual(p.posiciones_enemigos(), antes)
         self.assertEqual(p.historial.total(), 3)
 
     def test_enemigo_camina_hacia_el_jugador(self):
-        # Esperado: el enemigo llega a la casilla del jugador -> ATRAPADO
+        # Esperado: el enemigo llega a la casilla del jugador de forma autónoma -> ATRAPADO
         p = Partida(NIVEL_CHICO, semilla=5)
         a, b, c = p.solucion[2], p.solucion[1], p.solucion[0]
-        p.enemigos = [Enemigo(crear_ruta_patrulla([a, b]))]   # empieza en a, su próximo paso es b
+        p.enemigos = [Enemigo(crear_ruta_patrulla([a, b]), dificultad="Medio",
+                              intervalo_paso=0.5, rango_vision=4)]
         p.mover(direccion(c, b))                              # el jugador va a b
+        p.actualizar_tiempo(0.6)                              # el enemigo avanza a b de forma autónoma
         self.assertEqual(p.estado, ATRAPADO)
+        self.assertEqual(p.causa, "enemigo")
 
     def test_jugador_camina_hacia_el_enemigo(self):
         # Esperado: el jugador entra a la casilla de un enemigo -> ATRAPADO
@@ -163,6 +166,49 @@ class TestPartida(unittest.TestCase):
         self.assertIn("J ", texto)
         self.assertIn("E ", texto)
         self.assertIn("S ", texto)
+
+    def test_enemigos_no_avanzan_con_pasos_del_jugador(self):
+        # Esperado: al llamar partida.mover(), los enemigos no cambian de posición
+        p = Partida(NIVELES["1"], semilla=4)
+        antes = p.posiciones_enemigos()
+        self.assertTrue(p.mover(direccion(p.solucion[0], p.solucion[1])))
+        self.assertEqual(p.posiciones_enemigos(), antes)
+
+    def test_eco_si_avanza_con_pasos_del_jugador(self):
+        # Esperado: el Eco sigue avanzando estrictamente por turnos con partida.mover()
+        nivel_eco = dict(NIVEL_CHICO, eco=2)
+        p = Partida(nivel_eco, semilla=2)
+        for i in range(3):
+            self.assertTrue(p.mover(direccion(p.solucion[i], p.solucion[i + 1])))
+        self.assertTrue(p.eco.activo)
+        self.assertEqual(p.posicion_eco(), p.solucion[1])
+
+    def test_actualizar_tiempo_mueve_enemigos(self):
+        # Esperado: partida.actualizar_tiempo(1.5) mueve autónomamente a los enemigos
+        p = Partida(NIVELES["1"], semilla=4)
+        antes = p.posiciones_enemigos()
+        p.actualizar_tiempo(1.5)
+        self.assertNotEqual(p.posiciones_enemigos(), antes)
+
+    def test_captura_autonoma(self):
+        # Esperado: enemigo adyacente al jugador lo atrapa al avanzar el tiempo
+        p = Partida(NIVEL_CHICO, semilla=5)
+        pos_jugador = p.jugador.posicion
+        adyacente = p.solucion[1]
+        siguiente = p.solucion[2]
+        p.enemigos = [
+            Enemigo(
+                crear_ruta_patrulla([adyacente, siguiente]),
+                dificultad="Medio",
+                intervalo_paso=0.5,
+                rango_vision=4,
+            )
+        ]
+        capturado = p.actualizar_tiempo(0.6)
+        self.assertTrue(capturado)
+        self.assertEqual(p.estado, ATRAPADO)
+        self.assertEqual(p.causa, "enemigo")
+        self.assertEqual(p.enemigos[0].posicion, pos_jugador)
 
 
 if __name__ == "__main__":

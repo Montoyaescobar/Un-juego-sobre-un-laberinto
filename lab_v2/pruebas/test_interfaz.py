@@ -253,7 +253,7 @@ class TestInterfaz(unittest.TestCase):
         self.app.ir_a(P.Juego(self.app, NIVELES["1"]))
         juego = self.app.pantalla
         c = juego.partida.solucion
-        juego.partida.enemigos = [Enemigo(crear_ruta_patrulla([c[2], c[1]]))]
+        juego.partida.enemigos = [Enemigo(crear_ruta_patrulla([c[2], c[1]]), intervalo_paso=0.05)]
         juego.vis_e = [[float(c[2][0]), float(c[2][1])]]
         d = (c[1][0] - c[0][0], c[1][1] - c[0][1])
         self.cuadros(3, [tecla(FLECHAS[d])])

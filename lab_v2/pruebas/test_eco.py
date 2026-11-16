@@ -143,12 +143,12 @@ class TestEcoEnPartida(unittest.TestCase):
                 self.assertEqual(p.estado, GANO)
 
     def test_esperar_cuesta_movimiento_y_mueve_a_los_enemigos(self):
-        # Esperado: gasta 1 movimiento; los fantasmas avanzan; se guarda una foto
+        # Esperado: gasta 1 movimiento; se guarda una foto (los enemigos son autónomos en tiempo)
         p = Partida(NIVELES["1"], semilla=4)
         antes = p.posiciones_enemigos()
         self.assertTrue(p.esperar())
         self.assertEqual(p.jugador.movimientos, 1)
-        self.assertNotEqual(p.posiciones_enemigos(), antes)
+        self.assertEqual(p.posiciones_enemigos(), antes)
         self.assertEqual(p.historial.total(), 2)
 
     def test_esperar_demasiado_te_atrapa_el_eco(self):

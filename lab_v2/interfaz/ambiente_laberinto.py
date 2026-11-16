@@ -54,6 +54,8 @@ class AmbienteLaberinto:
                     azar.uniform(-5, 5), azar.uniform(-4, 2), azar.uniform(0, math.tau)]
                     for _ in range(cantidad)]
         self.brasas = []                 # cada una: [x, y, vx, vy, vida]
+        self.brasas_enemigo = []         # humo oscuro / brasas violetas de persecución
+        self.nivel_peligro = 0.0
         self._acum = [0.0] * len(self.fuentes)
         self.bandas = [[azar.uniform(0, 1), azar.uniform(0.15, 0.85), azar.uniform(0.6, 1.4)]
                     for _ in range(3)]
@@ -134,6 +136,7 @@ class AmbienteLaberinto:
             self._tiempo_lento = max(0.0, self._tiempo_lento - dt)
         if not self._pleno():
             self.brasas = []
+            self.brasas_enemigo = []
             return
 
         r = self.rect
@@ -167,6 +170,36 @@ class AmbienteLaberinto:
                 b[3] += 16 * dt                              # suben cada vez más despacio
                 vivas.append(b)
         self.brasas = vivas
+
+        vivas_enemigo = []
+        for b in self.brasas_enemigo:
+            b[4] -= dt
+            if b[4] > 0:
+                b[0] += b[2] * dt
+                b[1] += b[3] * dt
+                b[3] += 12 * dt
+                vivas_enemigo.append(b)
+        self.brasas_enemigo = vivas_enemigo
+
+    def emitir_pulso_enemigo(self, x, y, intenso=False):
+        """
+        Emite pequeñas partículas de humo oscuro o brasas violetas alrededor de un enemigo
+        en persecución, respetando el tope de partículas y el ajuste de efectos.
+        """
+        if not self._pleno() or len(self.brasas_enemigo) >= self.MAX_BRASAS // 2:
+            return
+        prob = 0.45 if intenso else 0.18
+        if random.random() > prob:
+            return
+        vida = random.uniform(0.35, 0.75)
+        self.brasas_enemigo.append([
+            x + random.uniform(-6, 6),
+            y + random.uniform(-4, 4),
+            random.uniform(-14, 14),
+            random.uniform(-28, -10),
+            vida,
+            vida,
+        ])
 
     # ---------------- dibujo (en este orden desde la partida) ----------------
     def dibujar_niebla(self, surf):
@@ -227,5 +260,9 @@ class AmbienteLaberinto:
             for x, y, _, _, vida in self.brasas:
                 k = max(0.0, min(1.0, vida / 0.5))
                 pygame.draw.rect(surf, mezclar((60, 20, 8), self.paleta["luz"], k),
+                                (int(x), int(y), 2, 2))
+            for x, y, _, _, vida, vida_max in self.brasas_enemigo:
+                k = max(0.0, min(1.0, vida / max(0.01, vida_max)))
+                pygame.draw.rect(surf, mezclar((28, 14, 38), (168, 82, 214), k),
                                 (int(x), int(y), 2, 2))
         surf.set_clip(previo)

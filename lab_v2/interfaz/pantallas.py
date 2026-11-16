@@ -1584,7 +1584,7 @@ class Juego(Pantalla):
         if self.partida.estado == JUGANDO or self.modo != "jugando":
             return
         self.modo = "fin_espera"
-        self.espera = 1.1
+        self.espera = 1.1 if self.partida.estado == GANO else 0.65
         if self.partida.estado == GANO:
             self.app.sonidos.reproducir("ganar")
             self.particulas.confeti(ANCHO)
@@ -1592,7 +1592,7 @@ class Juego(Pantalla):
             self.particulas.emitir(x, y, ORO, 50, 220, 1.0, 4)
         else:
             self.app.sonidos.reproducir("perder")
-            self.shake = 18.0
+            self.shake = max(self.shake, 18.0)
 
     # ------------------------------------------------------------ pausa y final
     def _armar_pausa(self):
@@ -1721,9 +1721,9 @@ class Juego(Pantalla):
         """(Interno) Centro en pantalla de una casilla (acepta posiciones decimales)."""
         return (self.origen[0] + (col + 0.5) * self.cell, self.origen[1] + (fila + 0.5) * self.cell)
 
-    def _acercar(self, vis, objetivo, dt):
+    def _acercar(self, vis, objetivo, dt, velocidad=16.0):
         """(Interno) Desliza una posición visual hacia su casilla real. Devuelve lo que se movió."""
-        k = min(1.0, dt * 16)
+        k = min(1.0, dt * velocidad)
         dx, dy = objetivo[0] - vis[0], objetivo[1] - vis[1]
         vis[0] += dx * k
         vis[1] += dy * k
@@ -1741,6 +1741,17 @@ class Juego(Pantalla):
         self.alerta_tiempo = max(0.0, self.alerta_tiempo - dt)
         self.ambiente.actualizar(dt, self.app.efectos > 0)
         self.zona.actualizar(dt)
+
+        if self.modo == "jugando" and self.partida.estado == JUGANDO:
+            if hasattr(self.partida, "actualizar_tiempo"):
+                self.partida.actualizar_tiempo(dt)
+            if self.partida.estado == ATRAPADO:
+                self.alerta = "¡Un enemigo te ha alcanzado en las sombras!"
+                self.alerta_tiempo = 2.0
+                self.shake = max(self.shake, 7.0)
+                self.app.sonidos.reproducir("pared")
+                self._revisar_fin()
+
         self.b_deshacer.habilitado = self.partida.jugador.pasos_por_deshacer() > 0 \
             and self.modo == "jugando"
         self.b_pista.etiqueta = "Pista gratis" if self.app.pistas_duende else \
@@ -1790,8 +1801,24 @@ class Juego(Pantalla):
             if movido > 0.05:
                 x, y = self._px(*self.vis_j)
                 self.particulas.estela(x, y, CIAN, max(2, self.cell // 9))
+            if len(self.vis_e) != len(self.partida.enemigos):
+                self.vis_e = [[float(e.posicion[0]), float(e.posicion[1])]
+                              for e in self.partida.enemigos]
             for vis, enemigo in zip(self.vis_e, self.partida.enemigos):
-                self._acercar(vis, enemigo.posicion, dt)
+                intervalo = max(0.05, float(getattr(enemigo, "intervalo_paso", 0.75) or 0.75))
+                v_lerp = max(8.0, 1.0 / intervalo)
+                mov_e = self._acercar(vis, enemigo.posicion, dt, v_lerp)
+                en_persecucion = getattr(enemigo, "estado", "patrulla") == "persecucion"
+                dist_j = (abs(enemigo.posicion[0] - self.partida.jugador.posicion[0])
+                          + abs(enemigo.posicion[1] - self.partida.jugador.posicion[1]))
+                if en_persecucion and dist_j <= 4:
+                    ex, ey = self._px(*vis)
+                    self.ambiente.emitir_pulso_enemigo(ex, ey, intenso=True)
+                    if mov_e > 0.02 and random.random() < min(1.0, dt * 15):
+                        self.particulas.estela(ex, ey, MORADO, max(2, self.cell // 10))
+                elif en_persecucion:
+                    ex, ey = self._px(*vis)
+                    self.ambiente.emitir_pulso_enemigo(ex, ey, intenso=False)
             casilla_eco = self.partida.posicion_eco()
             if casilla_eco is not None:
                 self._acercar(self.vis_eco, casilla_eco, dt)
@@ -1808,6 +1835,12 @@ class Juego(Pantalla):
             distancias = [abs(e.posicion[0] - self.partida.jugador.posicion[0])
                           + abs(e.posicion[1] - self.partida.jugador.posicion[1])
                           for e in self.partida.enemigos]
+            distancias_persecucion = [
+                abs(e.posicion[0] - self.partida.jugador.posicion[0])
+                + abs(e.posicion[1] - self.partida.jugador.posicion[1])
+                for e in self.partida.enemigos
+                if getattr(e, "estado", "patrulla") == "persecucion"
+            ]
             if casilla_eco is not None:           # el eco también enciende la viñeta de peligro
                 distancias.append(abs(casilla_eco[0] - self.partida.jugador.posicion[0])
                                   + abs(casilla_eco[1] - self.partida.jugador.posicion[1]))
@@ -1815,8 +1848,18 @@ class Juego(Pantalla):
                 distancias.append(abs(casilla_radar[0] - self.partida.jugador.posicion[0])
                                   + abs(casilla_radar[1] - self.partida.jugador.posicion[1]))
             cerca = min(distancias) if distancias else 99
-            objetivo = max(0.0, (5 - cerca) / 4.0) if self.partida.estado == JUGANDO else 0.0
-            self.peligro += (objetivo - self.peligro) * min(1.0, dt * 6)
+            cerca_persecucion = min(distancias_persecucion) if distancias_persecucion else 99
+            if self.partida.estado == JUGANDO:
+                objetivo = max(0.0, (5 - cerca) / 4.0)
+                if cerca_persecucion <= 4:
+                    objetivo = max(objetivo, min(1.0, (5.5 - cerca_persecucion) / 3.5))
+                elif cerca_persecucion < 99:
+                    objetivo = max(objetivo, 0.22)
+            else:
+                objetivo = 0.0
+            vel_peligro = 8.0 if cerca_persecucion <= 4 else 6.0
+            self.peligro += (objetivo - self.peligro) * min(1.0, dt * vel_peligro)
+            self.ambiente.nivel_peligro = self.peligro
 
         if self.modo == "fin_espera":
             self.espera -= dt
@@ -1989,7 +2032,9 @@ class Juego(Pantalla):
         self._dibujar_hud(surf)
         if self.alerta_tiempo > 0 and self.alerta:
             aviso = pygame.Rect(ANCHO // 2 - 230, ALTO - 52, 460, 36)
-            panel(surf, aviso, 232, VERDE if "esqueleto" in self.alerta.lower() else ORO, 2)
+            color_aviso = (VERDE if "esqueleto" in self.alerta.lower()
+                           else ROJO if "enemigo" in self.alerta.lower() else ORO)
+            panel(surf, aviso, 232, color_aviso, 2)
             texto(surf, self.alerta, 14, TEXTO, (aviso.centerx, aviso.centery), "center",
                   negrita=True)
 
