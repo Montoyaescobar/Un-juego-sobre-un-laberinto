@@ -9,7 +9,8 @@ import random
 
 import pygame
 
-from interfaz.tema import (PALETA_BASE, ORO, ROJO, mezclar, brillo)
+from interfaz.tema import (PALETA_BASE, ORO, ROJO, CIAN, VERDE, MORADO, TEXTO, APAGADO, BORDE,
+                           mezclar, brillo, texto, texto_ajustado)
 
 
 def tablero_estatico(lab, cell, semilla=3, paleta=None):
@@ -782,3 +783,326 @@ def dibujar_radar(surf, cx, cy, cell, t):
     pygame.draw.circle(capa, (255, 60, 60, 255), (c, c), r)
     pygame.draw.circle(capa, (255, 200, 200, 255), (c - r // 3, c - r // 3), max(1, r // 3))
     surf.blit(capa, (int(cx) - c, int(cy) - c))
+
+
+# =====================================================================================
+#  COLECCIONABLES (ESTRELLAS Y COFRES) E ICONOS DE INVENTARIO / CÓDICE OCULTO
+# =====================================================================================
+COLORES_RAREZA = {
+    "Común": (168, 176, 152),
+    "Rara": (92, 184, 230),
+    "Épica": (214, 132, 240),
+    "Legendaria": ORO,
+}
+
+
+def dibujar_estrella(surf, cx, cy, cell, t):
+    """
+    Dibuja una gema/estrella dorada coleccionable con levitación senoidal
+    (math.sin(t * 3.5) * 3 px), halo brillante y polvo dorado alrededor.
+
+    Recibe:
+        surf: superficie de pygame.
+        cx, cy: centro de la casilla en pantalla.
+        cell: tamaño de la casilla en píxeles.
+        t: tiempo en segundos.
+    Devuelve:
+        Nada.
+    """
+    flota = math.sin(t * 3.5) * 3.0
+    pulso = 0.78 + 0.22 * math.sin(t * 5.0 + cx * 0.03)
+    x = int(cx)
+    y = int(cy + flota)
+
+    # Sombra suave en el suelo que se encoge cuando la estrella sube.
+    sombra_w = max(6, int(cell * (0.36 - 0.03 * math.sin(t * 3.5))))
+    sombra_h = max(3, int(cell * 0.14))
+    pygame.draw.ellipse(surf, (10, 12, 9),
+                        (x - sombra_w // 2, int(cy + cell * 0.28), sombra_w, sombra_h))
+
+    # Halo brillante dorado.
+    brillo(surf, (x, y), max(6, int(cell * 0.85 * pulso)), ORO, 0.48 * pulso)
+
+    # Polvo dorado orbital sutil.
+    radio_polvo = max(5, int(cell * 0.36))
+    for i in range(4):
+        ang = t * 2.4 + i * (math.tau / 4)
+        px = int(x + math.cos(ang) * radio_polvo)
+        py = int(y + math.sin(ang * 1.3) * (radio_polvo * 0.65))
+        tam_p = 2 if (i + int(t * 4)) % 2 == 0 else 1
+        pygame.draw.rect(surf, (255, 232, 148), (px, py, tam_p, tam_p))
+
+    # Cuerpo de estrella/gema de 5 puntas (con facetas interiores).
+    r_ext = max(5, int(cell * 0.34))
+    r_int = max(2, int(r_ext * 0.44))
+    puntos = []
+    for i in range(10):
+        ang = -math.pi / 2 + i * (math.pi / 5)
+        r = r_ext if i % 2 == 0 else r_int
+        puntos.append((int(x + math.cos(ang) * r), int(y + math.sin(ang) * r)))
+
+    pygame.draw.polygon(surf, (168, 112, 28), [(px, py + 1) for px, py in puntos])
+    pygame.draw.polygon(surf, (246, 198, 76), puntos)
+    pygame.draw.polygon(surf, (255, 240, 170), puntos, 1)
+    # Núcleo centelleante.
+    pygame.draw.circle(surf, (255, 250, 210), (x, y), max(1, int(r_int * 0.65)))
+
+
+def dibujar_cofre(surf, cx, cy, cell, t, abierto=False):
+    """
+    Dibuja un cofre de madera noble y herrajes de bronce.
+    Si abierto=False: tapa cerrada, candado frontal y brillo ámbar tenue.
+    Si abierto=True: tapa abierta mostrando el resplandor interior del botín.
+
+    Recibe:
+        surf: superficie de pygame.
+        cx, cy: centro de la casilla en pantalla.
+        cell: tamaño de la casilla en píxeles.
+        t: tiempo en segundos.
+        abierto: True si el cofre ya fue abierto.
+    Devuelve:
+        Nada.
+    """
+    x, y = int(cx), int(cy)
+    w = max(10, int(cell * 0.64))
+    h = max(8, int(cell * 0.48))
+    pulso = 0.75 + 0.25 * math.sin(t * 4.0 + cx * 0.04)
+
+    # Sombra en el piso.
+    pygame.draw.ellipse(surf, (9, 12, 10),
+                        (x - w // 2 - 2, y + h // 2 - 2, w + 4, max(4, cell // 6)))
+
+    madera_oscura = (68, 43, 24)
+    madera_clara = (108, 69, 37)
+    bronce = (196, 152, 74)
+    bronce_luz = (242, 206, 122)
+
+    if not abierto:
+        # Brillo ámbar de cofre cerrado esperando ser descubierto.
+        brillo(surf, (x, y), max(6, int(cell * 0.78)), ORO, 0.32 * pulso)
+
+        caja = pygame.Rect(x - w // 2, y - h // 2 + 2, w, h)
+        # Base del cofre.
+        pygame.draw.rect(surf, madera_oscura, caja, border_radius=2)
+        # Tapa abovedada superior.
+        tapa = pygame.Rect(caja.x, caja.y - max(2, h // 5), caja.w, max(4, h // 2))
+        pygame.draw.rect(surf, madera_clara, tapa, border_radius=3)
+        # Bandas y bordes de bronce.
+        pygame.draw.rect(surf, bronce, caja, 1, border_radius=2)
+        pygame.draw.line(surf, (32, 20, 12),
+                         (caja.x + 1, caja.centery), (caja.right - 2, caja.centery), 2)
+        for bx in (caja.x + max(2, w // 5), caja.right - max(3, w // 5) - 1):
+            pygame.draw.line(surf, bronce, (bx, tapa.y + 1), (bx, caja.bottom - 2), max(1, w // 10))
+        # Cerradura central con destello ámbar.
+        cerradura = pygame.Rect(x - 2, caja.centery - 2, 5, 5)
+        pygame.draw.rect(surf, bronce_luz, cerradura, border_radius=1)
+        pygame.draw.rect(surf, (40, 28, 14), (x - 1, caja.centery, 2, 2))
+    else:
+        # Resplandor interior dorado/cian cuando está abierto.
+        brillo(surf, (x, y - 2), max(6, int(cell * 0.68)), (255, 215, 110), 0.26 * pulso)
+
+        base_h = max(5, int(h * 0.62))
+        base = pygame.Rect(x - w // 2, y + h // 2 - base_h, w, base_h)
+        tapa_abierta = pygame.Rect(x - w // 2, base.y - max(4, int(h * 0.52)),
+                                   w, max(4, int(h * 0.45)))
+        # Tapa levantada detrás.
+        pygame.draw.rect(surf, (52, 33, 18), tapa_abierta, border_radius=2)
+        pygame.draw.rect(surf, bronce, tapa_abierta, 1, border_radius=2)
+        # Interior iluminado con fulgor dorado.
+        interior = pygame.Rect(base.x + 2, base.y - 2, base.w - 4, 5)
+        pygame.draw.rect(surf, mezclar(ORO, (255, 248, 195), 0.55 * pulso), interior)
+        # Base de madera y herrajes.
+        pygame.draw.rect(surf, madera_oscura, base, border_radius=2)
+        pygame.draw.rect(surf, bronce, base, 1, border_radius=2)
+        for bx in (base.x + max(2, w // 5), base.right - max(3, w // 5) - 1):
+            pygame.draw.line(surf, bronce, (bx, base.y + 1), (bx, base.bottom - 2), max(1, w // 10))
+
+
+def dibujar_icono_item(surf, rect, tipo_icono, descubierto=True, color_acento=None):
+    """
+    Dibuja el icono pixel-art de un objeto del códice dentro de `rect`.
+    Si descubierto=False (o tipo_icono == 'incognita'), dibuja un candado / silueta en penumbra.
+
+    Recibe:
+        surf: superficie de pygame.
+        rect: pygame.Rect donde centrar el icono.
+        tipo_icono: 'espada', 'daga', 'baston', 'tunica', 'coraza', 'manto',
+                    'bota', 'ojo', 'escudo' o 'incognita'.
+        descubierto: False para mostrar candado y silueta oculta.
+        color_acento: color opcional de rareza.
+    Devuelve:
+        Nada.
+    """
+    r = pygame.Rect(rect)
+    cx, cy = r.centerx, r.centery
+    escala = min(r.w, r.h)
+    rad = max(8, int(escala * 0.36))
+
+    if not descubierto or tipo_icono == "incognita":
+        # Silueta oscura con candado de bronce apagado.
+        pygame.draw.circle(surf, (18, 20, 17), (cx, cy), rad + 2)
+        arco = pygame.Rect(cx - rad // 2, cy - rad + 2, rad, rad)
+        pygame.draw.arc(surf, (96, 90, 70), arco, 0, math.pi, max(2, rad // 4))
+        cuerpo = pygame.Rect(cx - int(rad * 0.68), cy - 2, int(rad * 1.36), int(rad * 0.95))
+        pygame.draw.rect(surf, (44, 41, 33), cuerpo, border_radius=3)
+        pygame.draw.rect(surf, (112, 102, 76), cuerpo, 2, border_radius=3)
+        pygame.draw.circle(surf, (20, 19, 15), (cx, cuerpo.centery - 1), max(2, rad // 5))
+        pygame.draw.line(surf, (20, 19, 15), (cx, cuerpo.centery), (cx, cuerpo.bottom - 3), 2)
+        return
+
+    acento = color_acento or ORO
+    brillo(surf, (cx, cy), int(rad * 1.45), acento, 0.22)
+
+    if tipo_icono == "espada":
+        # Espada de Ceniza (fuego verde).
+        p1 = (cx - int(rad * 0.65), cy + int(rad * 0.65))
+        p2 = (cx + int(rad * 0.72), cy - int(rad * 0.72))
+        pygame.draw.line(surf, (46, 92, 58), p1, p2, max(4, rad // 3))
+        pygame.draw.line(surf, (124, 242, 138), p1, p2, max(2, rad // 5))
+        guarda_a = (cx - int(rad * 0.55), cy + int(rad * 0.10))
+        guarda_b = (cx - int(rad * 0.10), cy + int(rad * 0.55))
+        pygame.draw.line(surf, ORO, guarda_a, guarda_b, max(3, rad // 4))
+        pygame.draw.circle(surf, (238, 196, 102), p1, max(2, rad // 5))
+    elif tipo_icono == "daga":
+        # Daga de Sombras (hojas gemelas curvas).
+        for dx, col in ((-3, (118, 168, 224)), (3, (176, 218, 255))):
+            pygame.draw.polygon(surf, col, [
+                (cx + dx, cy - int(rad * 0.75)),
+                (cx + dx + int(rad * 0.32), cy + int(rad * 0.15)),
+                (cx + dx, cy + int(rad * 0.45)),
+                (cx + dx - int(rad * 0.22), cy + int(rad * 0.10)),
+            ])
+        pygame.draw.line(surf, ORO, (cx - int(rad * 0.5), cy + int(rad * 0.35)),
+                         (cx + int(rad * 0.5), cy + int(rad * 0.35)), 3)
+        pygame.draw.rect(surf, (92, 66, 44), (cx - 2, cy + int(rad * 0.35), 5, int(rad * 0.42)))
+    elif tipo_icono == "baston":
+        # Bastón de Centella (vara arcana con orbe eléctrico).
+        pygame.draw.line(surf, (122, 84, 48),
+                         (cx - int(rad * 0.55), cy + int(rad * 0.75)),
+                         (cx + int(rad * 0.38), cy - int(rad * 0.38)), max(3, rad // 4))
+        orbe = (cx + int(rad * 0.42), cy - int(rad * 0.42))
+        pygame.draw.circle(surf, (214, 132, 240), orbe, max(4, int(rad * 0.42)))
+        pygame.draw.circle(surf, (255, 240, 200), orbe, max(2, int(rad * 0.22)))
+    elif tipo_icono == "tunica":
+        # Manto del Viajero.
+        pts = [
+            (cx - int(rad * 0.35), cy - int(rad * 0.65)),
+            (cx + int(rad * 0.35), cy - int(rad * 0.65)),
+            (cx + int(rad * 0.72), cy - int(rad * 0.15)),
+            (cx + int(rad * 0.52), cy + int(rad * 0.72)),
+            (cx - int(rad * 0.52), cy + int(rad * 0.72)),
+            (cx - int(rad * 0.72), cy - int(rad * 0.15)),
+        ]
+        pygame.draw.polygon(surf, (68, 86, 78), pts)
+        pygame.draw.polygon(surf, (158, 176, 152), pts, 2)
+        pygame.draw.line(surf, ORO, (cx, cy - int(rad * 0.55)), (cx, cy + int(rad * 0.68)), 2)
+    elif tipo_icono == "coraza":
+        # Coraza del Guardián.
+        pecho = pygame.Rect(cx - int(rad * 0.62), cy - int(rad * 0.58),
+                            int(rad * 1.24), int(rad * 1.20))
+        pygame.draw.rect(surf, (94, 118, 136), pecho, border_radius=4)
+        pygame.draw.rect(surf, (182, 214, 238), pecho, 2, border_radius=4)
+        pygame.draw.line(surf, ORO, (cx, pecho.y + 3), (cx, pecho.bottom - 3), 2)
+        pygame.draw.line(surf, ORO, (pecho.x + 4, cy), (pecho.right - 4, cy), 2)
+    elif tipo_icono == "manto":
+        # Manto de Bruma.
+        pts = [
+            (cx, cy - int(rad * 0.78)),
+            (cx + int(rad * 0.68), cy - int(rad * 0.15)),
+            (cx + int(rad * 0.56), cy + int(rad * 0.72)),
+            (cx, cy + int(rad * 0.52)),
+            (cx - int(rad * 0.56), cy + int(rad * 0.72)),
+            (cx - int(rad * 0.68), cy - int(rad * 0.15)),
+        ]
+        pygame.draw.polygon(surf, (92, 64, 118), pts)
+        pygame.draw.polygon(surf, (208, 160, 244), pts, 2)
+    elif tipo_icono == "bota":
+        # Paso Ligero.
+        pts = [
+            (cx - int(rad * 0.35), cy - int(rad * 0.65)),
+            (cx + int(rad * 0.15), cy - int(rad * 0.65)),
+            (cx + int(rad * 0.15), cy + int(rad * 0.15)),
+            (cx + int(rad * 0.68), cy + int(rad * 0.32)),
+            (cx + int(rad * 0.68), cy + int(rad * 0.68)),
+            (cx - int(rad * 0.45), cy + int(rad * 0.68)),
+        ]
+        pygame.draw.polygon(surf, (132, 92, 52), pts)
+        pygame.draw.polygon(surf, ORO, pts, 2)
+    elif tipo_icono == "ojo":
+        # Ojo del Zahorí.
+        pts = [
+            (cx - int(rad * 0.78), cy),
+            (cx, cy - int(rad * 0.48)),
+            (cx + int(rad * 0.78), cy),
+            (cx, cy + int(rad * 0.48)),
+        ]
+        pygame.draw.polygon(surf, (42, 68, 78), pts)
+        pygame.draw.polygon(surf, (124, 214, 242), pts, 2)
+        pygame.draw.circle(surf, ORO, (cx, cy), max(3, int(rad * 0.28)))
+        pygame.draw.circle(surf, (20, 22, 18), (cx, cy), max(1, int(rad * 0.12)))
+    else:
+        # Escudo / Velo contra el Eco (por defecto).
+        pts = [
+            (cx - int(rad * 0.62), cy - int(rad * 0.62)),
+            (cx + int(rad * 0.62), cy - int(rad * 0.62)),
+            (cx + int(rad * 0.56), cy + int(rad * 0.12)),
+            (cx, cy + int(rad * 0.76)),
+            (cx - int(rad * 0.56), cy + int(rad * 0.12)),
+        ]
+        pygame.draw.polygon(surf, (64, 98, 128), pts)
+        pygame.draw.polygon(surf, acento, pts, 2)
+        pygame.draw.circle(surf, (235, 222, 168), (cx, cy - 2), max(2, rad // 4))
+
+
+def dibujar_ranura_item(surf, rect, item, seleccionado=False, equipado=False):
+    """
+    Dibuja una casilla interactiva del inventario / Códice Oculto.
+    Si item['descubierto'] es False: casilla en penumbra con borde tenue, candado y título '???'.
+    Si item['descubierto'] es True: icono del objeto con su color de rareza y nombre visible.
+
+    Recibe:
+        surf: superficie de pygame.
+        rect: pygame.Rect de la casilla.
+        item: diccionario del ítem (con claves 'descubierto', 'nombre', 'icono', 'rareza', etc.).
+        seleccionado: True si la casilla está seleccionada por el usuario.
+        equipado: True si el ítem está actualmente equipado.
+    Devuelve:
+        Nada.
+    """
+    r = pygame.Rect(rect)
+    descubierto = bool(item.get("descubierto", False))
+    rareza = item.get("rareza", "Común")
+    color_rareza = COLORES_RAREZA.get(rareza, ORO)
+
+    if not descubierto:
+        fondo = (16, 17, 14) if not seleccionado else (28, 28, 22)
+        borde = (64, 60, 46) if not seleccionado else ORO
+        pygame.draw.rect(surf, fondo, r, border_radius=6)
+        pygame.draw.rect(surf, borde, r, 2 if not seleccionado else 3, border_radius=6)
+        icono_rect = pygame.Rect(r.x + 8, r.y + 6, r.w - 16, max(24, r.h - 30))
+        dibujar_icono_item(surf, icono_rect, "incognita", descubierto=False)
+        texto(surf, "???", 14, (118, 112, 92) if not seleccionado else ORO,
+              (r.centerx, r.bottom - 13), "center", negrita=True, sombra=False)
+        return
+
+    fondo = mezclar((26, 28, 22), color_rareza, 0.16 if not seleccionado else 0.28)
+    borde = ORO if seleccionado else mezclar(BORDE, color_rareza, 0.65)
+    pygame.draw.rect(surf, fondo, r, border_radius=6)
+    if seleccionado:
+        brillo(surf, r.center, max(24, int(min(r.w, r.h) * 0.75)), color_rareza, 0.22)
+    pygame.draw.rect(surf, borde, r, 3 if seleccionado else 2, border_radius=6)
+
+    icono_rect = pygame.Rect(r.x + 8, r.y + 6, r.w - 16, max(24, r.h - 30))
+    dibujar_icono_item(surf, icono_rect, item.get("icono", "espada"),
+                       descubierto=True, color_acento=color_rareza)
+
+    nombre = item.get("nombre", "Artefacto")
+    texto_ajustado(surf, nombre, 12, TEXTO if seleccionado else (210, 204, 178),
+                   (r.centerx, r.bottom - 12), r.w - 10, "center", negrita=seleccionado)
+
+    if equipado or item.get("equipado", False):
+        insignia = pygame.Rect(r.right - 22, r.y + 4, 18, 16)
+        pygame.draw.rect(surf, (32, 58, 34), insignia, border_radius=3)
+        pygame.draw.rect(surf, VERDE, insignia, 1, border_radius=3)
+        texto(surf, "E", 11, VERDE, insignia.center, "center", negrita=True, sombra=False)
+

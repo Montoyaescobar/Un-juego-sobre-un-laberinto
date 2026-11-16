@@ -41,12 +41,161 @@ from interfaz.render import (tablero_estatico, dibujar_portal, dibujar_jugador, 
                              dibujar_pista, dibujar_trampa, dibujar_reliquia, dibujar_puas,
                              dibujar_puente, dibujar_vela, dibujar_trampa_giratoria,
                              dibujar_cadena, dibujar_esqueleto, dibujar_espada_verde, dibujar_rueda,
-                             dibujar_eco, dibujar_radar, Linterna)
+                             dibujar_eco, dibujar_radar, dibujar_estrella, dibujar_cofre,
+                             dibujar_icono_item, dibujar_ranura_item, COLORES_RAREZA, Linterna)
 from interfaz.tema import (ANCHO, ALTO, PANEL, BORDE, CIAN, ORO, ROJO, VERDE, MORADO,
                            TEXTO, APAGADO, OSCURIDAD_POR_BRILLO, NOMBRES_BRILLO, NOMBRES_EFECTOS,
                            paleta_de, fuente, texto, texto_ajustado, panel, brillo, mezclar, vineta)
 from interfaz.widgets import (Boton, CampoTexto, icono_play, icono_pausa, icono_atras,
                               icono_inicio, icono_final)
+try:
+    from juego.inventario import (
+        Inventario,
+        CATALOGO_OBJETOS,
+        CATEGORIA_ARMA,
+        CATEGORIA_ARMADURA,
+        CATEGORIA_HABILIDAD,
+    )
+except ImportError:
+    CATEGORIA_ARMA = "arma"
+    CATEGORIA_ARMADURA = "armadura"
+    CATEGORIA_HABILIDAD = "habilidad"
+
+    CATALOGO_OBJETOS = {
+        "espada_ceniza": {
+            "id": "espada_ceniza", "categoria": CATEGORIA_ARMA, "nombre": "Espada de Ceniza",
+            "descripcion": "Hoja imbuida con fuego verde. Corta esqueletos frontales.",
+            "rareza": "Común", "desbloqueado_inicio": True, "icono": "espada"
+        },
+        "daga_sombras": {
+            "id": "daga_sombras", "categoria": CATEGORIA_ARMA, "nombre": "Daga de Sombras",
+            "descripcion": "Ataca en ráfaga circular a enemigos adyacentes a corta distancia.",
+            "rareza": "Rara", "desbloqueado_inicio": False, "icono": "daga"
+        },
+        "baston_centella": {
+            "id": "baston_centella", "categoria": CATEGORIA_ARMA, "nombre": "Bastón de Centella",
+            "descripcion": "Dispara un destello en línea recta que aturde a un enemigo 3s.",
+            "rareza": "Épica", "desbloqueado_inicio": False, "icono": "baston"
+        },
+        "manto_viajero": {
+            "id": "manto_viajero", "categoria": CATEGORIA_ARMADURA, "nombre": "Manto del Viajero",
+            "descripcion": "Prenda ligera de tela reforzada. Atuendo inicial.",
+            "rareza": "Común", "desbloqueado_inicio": True, "icono": "tunica"
+        },
+        "coraza_guardian": {
+            "id": "coraza_guardian", "categoria": CATEGORIA_ARMADURA, "nombre": "Coraza del Guardián",
+            "descripcion": "Armadura de placas rúnicas. Otorga +5 movimientos máximos por nivel.",
+            "rareza": "Rara", "desbloqueado_inicio": False, "icono": "coraza"
+        },
+        "manto_bruma": {
+            "id": "manto_bruma", "categoria": CATEGORIA_ARMADURA, "nombre": "Manto de Bruma",
+            "descripcion": "Camuflaje espectral. Reduce en 2 casillas el radio de visión de los enemigos.",
+            "rareza": "Épica", "desbloqueado_inicio": False, "icono": "manto"
+        },
+        "paso_ligero": {
+            "id": "paso_ligero", "categoria": CATEGORIA_HABILIDAD, "nombre": "Paso Ligero",
+            "descripcion": "Desplazamiento ágil en el campamento y mayor fluidez al deslizar muros.",
+            "rareza": "Común", "desbloqueado_inicio": True, "icono": "bota"
+        },
+        "ojo_zahori": {
+            "id": "ojo_zahori", "categoria": CATEGORIA_HABILIDAD, "nombre": "Ojo del Zahorí",
+            "descripcion": "El resplandor de la linterna revela la dirección del cofre más cercano.",
+            "rareza": "Rara", "desbloqueado_inicio": False, "icono": "ojo"
+        },
+        "escudo_eco": {
+            "id": "escudo_eco", "categoria": CATEGORIA_HABILIDAD, "nombre": "Velo contra el Eco",
+            "descripcion": "Retrasa la persecución de tu sombra (+2 pasos de gracia de la Cola).",
+            "rareza": "Épica", "desbloqueado_inicio": False, "icono": "escudo"
+        },
+    }
+
+    class Inventario:
+        """Fallback de Inventario cuando juego/inventario.py aún no está presente."""
+
+        def __init__(self, datos_guardados=None):
+            self.desbloqueados = {
+                k for k, v in CATALOGO_OBJETOS.items() if v.get("desbloqueado_inicio", False)
+            }
+            self.arma_equipada = "espada_ceniza"
+            self.armadura_equipada = "manto_viajero"
+            self.habilidad_equipada = "paso_ligero"
+            self.oro = 0
+            self.estrellas_totales = 0
+            if isinstance(datos_guardados, dict):
+                self.desbloqueados.update(datos_guardados.get("desbloqueados", []))
+                self.arma_equipada = datos_guardados.get("arma_equipada", self.arma_equipada)
+                self.armadura_equipada = datos_guardados.get("armadura_equipada", self.armadura_equipada)
+                self.habilidad_equipada = datos_guardados.get("habilidad_equipada", self.habilidad_equipada)
+                self.oro = int(datos_guardados.get("oro", 0))
+                self.estrellas_totales = int(datos_guardados.get("estrellas_totales", 0))
+
+        def obtener_coleccion(self):
+            coleccion = []
+            for id_item, base in CATALOGO_OBJETOS.items():
+                desc = id_item in self.desbloqueados
+                equipado = id_item in (self.arma_equipada, self.armadura_equipada, self.habilidad_equipada)
+                if desc:
+                    item = dict(base)
+                    item["descubierto"] = True
+                    item["equipado"] = equipado
+                else:
+                    item = {
+                        "id": id_item,
+                        "categoria": base["categoria"],
+                        "nombre": "???",
+                        "descripcion": "Artefacto desconocido. Abre cofres en el laberinto para descubrirlo.",
+                        "rareza": base["rareza"],
+                        "icono": "incognita",
+                        "descubierto": False,
+                        "equipado": False,
+                    }
+                coleccion.append(item)
+            return coleccion
+
+        def descubrir_item(self, id_item):
+            if id_item not in CATALOGO_OBJETOS or id_item in self.desbloqueados:
+                return False
+            self.desbloqueados.add(id_item)
+            return True
+
+        def equipar(self, id_item):
+            if id_item not in self.desbloqueados or id_item not in CATALOGO_OBJETOS:
+                return False
+            cat = CATALOGO_OBJETOS[id_item]["categoria"]
+            if cat == CATEGORIA_ARMA:
+                self.arma_equipada = id_item
+            elif cat == CATEGORIA_ARMADURA:
+                self.armadura_equipada = id_item
+            elif cat == CATEGORIA_HABILIDAD:
+                self.habilidad_equipada = id_item
+            return True
+
+        def sortear_botin(self):
+            pendientes = [k for k in CATALOGO_OBJETOS if k not in self.desbloqueados]
+            return pendientes[0] if pendientes else 60
+
+        def to_dict(self):
+            return {
+                "desbloqueados": sorted(self.desbloqueados),
+                "arma_equipada": self.arma_equipada,
+                "armadura_equipada": self.armadura_equipada,
+                "habilidad_equipada": self.habilidad_equipada,
+                "oro": self.oro,
+                "estrellas_totales": self.estrellas_totales,
+            }
+
+        @classmethod
+        def from_dict(cls, datos):
+            return cls(datos)
+
+
+def _obtener_inventario(app):
+    """Obtiene o inicializa la instancia de Inventario asociada a `app`."""
+    inv = getattr(app, "inventario", None)
+    if inv is None:
+        inv = Inventario()
+        setattr(app, "inventario", inv)
+    return inv
 from interfaz import colisiones_campamento
 from interfaz.controlador_campamento import ControladorCampamento
 try:
@@ -546,6 +695,13 @@ class Campamento(Pantalla):
                 self.antorcha = not self.antorcha
                 self.app.antorcha_encendida = self.antorcha
                 return
+            elif e.key in (pygame.K_i, pygame.K_TAB):
+                self.teclas.clear()
+                if hasattr(self, "controlador"):
+                    self.controlador.limpiar_teclas()
+                self.app.sonidos.reproducir("clic")
+                self.app.ir_a(PantallaInventario(self.app, lambda: self))
+                return
         if e.type == pygame.KEYDOWN and e.key in MOVIMIENTOS:
             self.teclas.add(e.key)
         elif e.type == pygame.KEYUP:
@@ -1003,7 +1159,7 @@ class Campamento(Pantalla):
               (47, 108), sombra=False)
 
         objetivo = self._objetivo_cercano()          # SEC-11: indicador dinámico
-        indicacion = objetivo or "WASD / FLECHAS · MOVER     E · INTERACTUAR     L · ANTORCHA"
+        indicacion = objetivo or "WASD / FLECHAS · MOVER     E · INTERACTUAR     I / TAB · INVENTARIO     L · ANTORCHA"
         panel(surf, pygame.Rect(26, 638, 1048, 56), 228)
         texto(surf, indicacion, 15, ORO if objetivo else TEXTO,
               (ANCHO // 2, 656), "midtop", negrita=bool(objetivo))
@@ -1125,7 +1281,16 @@ class Juego(Pantalla):
         self.nivel = nivel
         self.color_nivel = COLOR_NIVEL[nivel["nombre"]]
         self.zona = fondo_de(nivel["nombre"])     # paisaje propio de la zona, detrás del tablero
-        self.partida = Partida(nivel)
+        self.inventario = _obtener_inventario(app)
+        try:
+            self.partida = Partida(nivel, inventario=self.inventario)
+        except TypeError:
+            self.partida = Partida(nivel)
+        if hasattr(self.partida, "inventario") and getattr(self.partida, "inventario", None) is not None:
+            self.inventario = self.partida.inventario
+            app.inventario = self.inventario
+        else:
+            setattr(self.partida, "inventario", self.inventario)
         app.ultima_partida = self.partida
         lab = self.partida.laberinto
         self.cell = max(10, min(self.AREA_W // lab.ancho, self.AREA_H // lab.alto))
@@ -1153,6 +1318,7 @@ class Juego(Pantalla):
         self.rotatoria = self._crear_rotatoria()
         self.esqueletos = self._crear_esqueletos()
         self.velas = self._crear_velas()
+        self._asegurar_coleccionables_partida()
         self.ambiente = AmbienteLaberinto(
             pygame.Rect(self.origen, (self.tw, self.th)), self.paleta,
             [self._px(*vela["casilla"]) for vela in self.velas], self.cell * 2.4)
@@ -1177,13 +1343,14 @@ class Juego(Pantalla):
         self.guardado = None             # None = sin decidir, número = puesto, 0 = omitido
         self.peligro = 0.0
 
-        x, w, h = 800, 260, 42
-        self.b_pista = Boton("Pista  (−%d mov.)" % COSTO_PISTA, (x, 330, w, h), self.pedir_pista,
-                             "H", ORO, 20)
-        self.b_deshacer = Boton("Deshacer", (x, 382, w, h), self.deshacer, "U", CIAN, 20)
-        self.b_luz = Boton("Antorcha", (x, 434, w, h), self.alternar_luz, "L", MORADO, 20)
-        self.b_pausa = Boton("Pausa", (x, 486, w, h), self.pausar, "Esc", APAGADO, 20)
-        self.botones_hud = [self.b_pista, self.b_deshacer, self.b_luz, self.b_pausa]
+        x, w, h = 800, 260, 38
+        self.b_pista = Boton("Pista  (−%d mov.)" % COSTO_PISTA, (x, 320, w, h), self.pedir_pista,
+                             "H", ORO, 19)
+        self.b_deshacer = Boton("Deshacer", (x, 364, w, h), self.deshacer, "U", CIAN, 19)
+        self.b_luz = Boton("Antorcha", (x, 408, w, h), self.alternar_luz, "L", MORADO, 19)
+        self.b_inventario = Boton("Códice / Inventario", (x, 452, w, h), self.abrir_inventario, "I", ORO, 19)
+        self.b_pausa = Boton("Pausa", (x, 496, w, h), self.pausar, "Esc", APAGADO, 19)
+        self.botones_hud = [self.b_pista, self.b_deshacer, self.b_luz, self.b_inventario, self.b_pausa]
         self.botones_pausa = []
         self.botones_fin = []
         self._armar_pausa()
@@ -1373,6 +1540,139 @@ class Juego(Pantalla):
         return [{"casilla": pos, "fase": random.uniform(0, math.tau)}
                 for pos in candidatas[:cantidad]]
 
+    def _asegurar_coleccionables_partida(self):
+        """
+        Garantiza que la partida exponga `estrellas`, `estrellas_recogidas`, `cofres`,
+        `cofres_abiertos`, `recoger_estrella()`, `abrir_cofre()` y `estrellas_conseguidas()`
+        incluso si `juego/partida.py` aún no los inicializó.
+        """
+        p = self.partida
+        lab = p.laberinto
+        segura = set(p.solucion)
+        ocupadas = set(segura) | {lab.entrada, lab.salida}
+        ocupadas.update(self.trampa["camino"])
+        if self.trampa["hallazgo"] is not None:
+            ocupadas.add(self.trampa["hallazgo"])
+        if self.puas:
+            ocupadas.add(self.puas["casilla"])
+        if self.rueda:
+            ocupadas.update(self.rueda["camino"])
+        for esq in self.esqueletos:
+            ocupadas.add(esq["casilla"])
+
+        ramales = [
+            (f, c)
+            for f in range(lab.alto)
+            for c in range(lab.ancho)
+            if lab.es_transitable(f, c) and (f, c) not in ocupadas
+        ]
+        if len(ramales) < 4:
+            ramales = [
+                (f, c)
+                for f in range(lab.alto)
+                for c in range(lab.ancho)
+                if lab.es_transitable(f, c) and (f, c) not in (lab.entrada, lab.salida)
+            ]
+        random.shuffle(ramales)
+
+        if not hasattr(p, "estrellas"):
+            p.estrellas = list(ramales[:3])
+        if not hasattr(p, "estrellas_recogidas"):
+            p.estrellas_recogidas = 0
+        if not hasattr(p, "cofres"):
+            usadas = set(p.estrellas)
+            libres = [pos for pos in ramales if pos not in usadas]
+            cant_cofres = 1 if self.nivel["filas"] < 12 else 2
+            ocultos = [
+                k for k in CATALOGO_OBJETOS
+                if k not in self.inventario.desbloqueados
+            ]
+            random.shuffle(ocultos)
+            cofres = []
+            for idx, pos in enumerate(libres[:cant_cofres]):
+                contenido = ocultos[idx] if idx < len(ocultos) else "oro_50"
+                cofres.append({"casilla": pos, "abierto": False, "contenido": contenido})
+            p.cofres = cofres
+        if not hasattr(p, "cofres_abiertos"):
+            p.cofres_abiertos = 0
+
+        if not hasattr(p, "recoger_estrella"):
+            def _recoger_estrella():
+                pos = p.jugador.posicion
+                if pos in p.estrellas:
+                    p.estrellas.remove(pos)
+                    p.estrellas_recogidas += 1
+                    return True
+                return False
+            p.recoger_estrella = _recoger_estrella
+
+        if not hasattr(p, "abrir_cofre"):
+            def _abrir_cofre():
+                pos = p.jugador.posicion
+                for cofre in p.cofres:
+                    if cofre.get("casilla") == pos and not cofre.get("abierto", False):
+                        cofre["abierto"] = True
+                        p.cofres_abiertos = getattr(p, "cofres_abiertos", 0) + 1
+                        return cofre
+                return None
+            p.abrir_cofre = _abrir_cofre
+
+        if not hasattr(p, "estrellas_conseguidas"):
+            def _estrellas_conseguidas():
+                if p.estado != GANO:
+                    return 0
+                rec = getattr(p, "estrellas_recogidas", 0)
+                cof = getattr(p, "cofres_abiertos", 0)
+                if rec >= 3:
+                    return 3
+                if rec >= 2 or cof >= 1:
+                    return 2
+                return 1
+            p.estrellas_conseguidas = _estrellas_conseguidas
+
+    def _procesar_botin_cofre(self, botin):
+        """Extrae y registra en el inventario el ítem o recompensa de un cofre abierto."""
+        id_item = None
+        nombre_item = None
+        if isinstance(botin, str):
+            id_item = botin
+        elif isinstance(botin, dict):
+            if "id" in botin and botin["id"] in CATALOGO_OBJETOS:
+                id_item = botin["id"]
+                nombre_item = botin.get("nombre")
+            elif isinstance(botin.get("item"), dict):
+                id_item = botin["item"].get("id")
+                nombre_item = botin["item"].get("nombre")
+            elif isinstance(botin.get("item"), str):
+                id_item = botin["item"]
+            elif isinstance(botin.get("contenido"), dict):
+                id_item = botin["contenido"].get("id")
+                nombre_item = botin["contenido"].get("nombre")
+            elif isinstance(botin.get("contenido"), str):
+                id_item = botin["contenido"]
+            elif "nombre" in botin and botin.get("nombre") != "???":
+                nombre_item = botin["nombre"]
+
+        if id_item and id_item in CATALOGO_OBJETOS:
+            self.inventario.descubrir_item(id_item)
+            nombre_item = nombre_item or CATALOGO_OBJETOS[id_item]["nombre"]
+        elif not nombre_item:
+            pendientes = [k for k in CATALOGO_OBJETOS if k not in self.inventario.desbloqueados]
+            if pendientes:
+                elegido = pendientes[0]
+                self.inventario.descubrir_item(elegido)
+                nombre_item = CATALOGO_OBJETOS[elegido]["nombre"]
+
+        if nombre_item:
+            return "¡NUEVO ARTEFACTO: %s!" % nombre_item
+        oro_ganado = 50
+        if isinstance(botin, int):
+            oro_ganado = botin
+        elif isinstance(botin, dict) and isinstance(botin.get("oro"), int):
+            oro_ganado = botin["oro"]
+        self.inventario.oro = getattr(self.inventario, "oro", 0) + oro_ganado
+        return "¡COFRE DEL TESORO: +%d de Oro!" % oro_ganado
+
     def _rotatoria_segura(self):
         """Ventana legible del rotor: cuando las cuchillas están casi verticales."""
         if not self.rotatoria:
@@ -1515,10 +1815,46 @@ class Juego(Pantalla):
             if self.cadena:
                 self.cadena["estado"] = "superada"
             self.salto_tiempo = 0.0
+        estrellas_antes = getattr(self.partida, "estrellas_recogidas", 0)
+        cofres_cerrados_antes = [
+            c for c in getattr(self.partida, "cofres", [])
+            if not c.get("abierto", False)
+        ]
         if self.partida.mover(direccion):
             self._procesar_trampa()
             self._procesar_rueda()
-            self.app.sonidos.reproducir("paso")
+            recogio_estrella = (
+                self.partida.recoger_estrella()
+                if hasattr(self.partida, "recoger_estrella")
+                else False
+            )
+            botin_cofre = None
+            if hasattr(self.partida, "abrir_cofre"):
+                try:
+                    botin_cofre = self.partida.abrir_cofre(self.inventario)
+                except TypeError:
+                    botin_cofre = self.partida.abrir_cofre()
+            if not recogio_estrella and getattr(self.partida, "estrellas_recogidas", 0) > estrellas_antes:
+                recogio_estrella = True
+            if botin_cofre is None:
+                for c_ant in cofres_cerrados_antes:
+                    if c_ant.get("abierto", False):
+                        botin_cofre = c_ant
+                        break
+            px_j, py_j = self._px(*self.partida.jugador.posicion)
+            if botin_cofre is not None:
+                self.alerta = self._procesar_botin_cofre(botin_cofre)
+                self.alerta_tiempo = 2.8
+                self.particulas.emitir(px_j, py_j, ORO, 26, 135, 0.95, 3)
+                self.app.sonidos.reproducir("guardar")
+                self.app.guardar_checkpoint(self.app.punto_guardado or (550.0, 596.0))
+            elif recogio_estrella:
+                self.alerta = "+150 pts Estrella"
+                self.alerta_tiempo = 2.2
+                self.particulas.emitir(px_j, py_j, ORO, 22, 120, 0.9, 3)
+                self.app.sonidos.reproducir("guardar")
+            else:
+                self.app.sonidos.reproducir("paso")
         else:
             self.app.sonidos.reproducir("pared")
             self.shake = max(self.shake, 3.0)
@@ -1595,15 +1931,23 @@ class Juego(Pantalla):
             self.shake = max(self.shake, 18.0)
 
     # ------------------------------------------------------------ pausa y final
+    def abrir_inventario(self):
+        """Abre la pantalla interactiva de Inventario y Códice Oculto."""
+        if self.modo not in ("jugando", "pausa"):
+            return
+        self.app.sonidos.reproducir("clic")
+        self.app.ir_a(PantallaInventario(self.app, lambda: self))
+
     def _armar_pausa(self):
         """(Interno) Crea los botones del menú de pausa."""
         cx = ANCHO // 2
         self.botones_pausa = [
-            Boton("Continuar", (cx - 160, 300, 320, 50), self._continuar, "Esc", CIAN, 24),
-            Boton("Reiniciar nivel", (cx - 160, 362, 320, 50), self._reiniciar, "", ORO, 24),
-            Boton("Volver al campamento", (cx - 160, 424, 320, 50),
+            Boton("Continuar", (cx - 160, 266, 320, 48), self._continuar, "Esc", CIAN, 22),
+            Boton("Inventario y Códice", (cx - 160, 324, 320, 48), self.abrir_inventario, "I", ORO, 22),
+            Boton("Reiniciar nivel", (cx - 160, 382, 320, 48), self._reiniciar, "", MORADO, 22),
+            Boton("Volver al campamento", (cx - 160, 440, 320, 48),
                   lambda: self.app.ir_a(Campamento(self.app)),
-                  "", ROJO, 24),
+                  "", ROJO, 22),
         ]
 
     def _continuar(self):
@@ -1691,6 +2035,9 @@ class Juego(Pantalla):
                     self.saltar()
                 elif e.key in (pygame.K_f, pygame.K_x):
                     self.atacar()
+                elif e.key in (pygame.K_i, pygame.K_TAB):
+                    self.app.sonidos.reproducir("clic")
+                    self.app.ir_a(PantallaInventario(self.app, lambda: self))
                 elif e.key in (pygame.K_ESCAPE, pygame.K_p):
                     self.pausar()
         elif self.modo == "pausa":
@@ -1762,6 +2109,7 @@ class Juego(Pantalla):
         rueda_activa = self.rueda and self.rueda["estado"] == "rodando"
         self.b_pausa.habilitado = self.modo == "jugando" and \
             self.trampa["estado"] != "activa" and not rueda_activa
+        self.b_inventario.habilitado = self.modo == "jugando"
         self.b_luz.etiqueta = "Antorcha: " + ("abierta" if self.linterna_on else "cubierta")
 
         if self.modo == "jugando" and self.trampa["estado"] == "activa":
@@ -1966,6 +2314,17 @@ class Juego(Pantalla):
         if self.trampa["hallazgo"] is not None and not self.trampa["hallazgo_tomado"]:
             hx, hy = self._px(*self.trampa["hallazgo"])
             dibujar_reliquia(surf, hx, hy, self.cell, self.t)
+        for cofre in getattr(p, "cofres", []):
+            casilla_c = cofre.get("casilla") if isinstance(cofre, dict) else cofre
+            abierto_c = cofre.get("abierto", False) if isinstance(cofre, dict) else False
+            if casilla_c is not None:
+                cx_c, cy_c = self._px(*casilla_c)
+                dibujar_cofre(surf, cx_c, cy_c, self.cell, self.t, abierto=abierto_c)
+        for estrella_pos in getattr(p, "estrellas", []):
+            casilla_e = estrella_pos.get("casilla") if isinstance(estrella_pos, dict) else estrella_pos
+            if casilla_e is not None:
+                ex_s, ey_s = self._px(*casilla_e)
+                dibujar_estrella(surf, ex_s, ey_s, self.cell, self.t)
         if p.pista_actual:
             dibujar_pista(surf, p.pista_actual, self.origen, self.cell, self.t)
         jx, jy = self._px(*self.vis_j)
@@ -2011,6 +2370,17 @@ class Juego(Pantalla):
         self.ambiente.dibujar_polvo(surf)
         luces = [(sx - self.origen[0], sy - self.origen[1])]
         luces.extend(self.ambiente.luces_para_linterna(self.origen))     # antorchas que parpadean
+        for estrella_pos in getattr(p, "estrellas", []):
+            casilla_e = estrella_pos.get("casilla") if isinstance(estrella_pos, dict) else estrella_pos
+            if casilla_e is not None:
+                ex_s, ey_s = self._px(*casilla_e)
+                luces.append((ex_s - self.origen[0], ey_s - self.origen[1], 0.55))
+        for cofre in getattr(p, "cofres", []):
+            casilla_c = cofre.get("casilla") if isinstance(cofre, dict) else cofre
+            abierto_c = cofre.get("abierto", False) if isinstance(cofre, dict) else False
+            if casilla_c is not None and not abierto_c:
+                cx_c, cy_c = self._px(*casilla_c)
+                luces.append((cx_c - self.origen[0], cy_c - self.origen[1], 0.50))
         if self.ataque_animacion > 0:
             dxf, dyf = DIRECCIONES[self.direccion]
             luces.append((jx + dxf * self.cell * 0.48 - self.origen[0],
@@ -2114,6 +2484,10 @@ class Juego(Pantalla):
         texto(surf, self.nivel["nombre"].upper(), 34, color, (800, 34), negrita=True)
         texto(surf, "Laberinto %d × %d" % (self.nivel["filas"], self.nivel["columnas"]), 16,
               (205, 198, 168), (802, 76), sombra=False)
+        estrellas_rec = min(3, max(0, int(getattr(p, "estrellas_recogidas", 0))))
+        cadena_estrellas = " ".join("★" if k < estrellas_rec else "☆" for k in range(3))
+        texto(surf, cadena_estrellas, 22, ORO, (1060, 42), "topright", negrita=True)
+        texto(surf, "I / Tab · Códice", 12, CIAN, (1060, 76), "topright", sombra=False)
 
         # Barra de movimientos: con marcas cada 10 % y un borde que late cuando quedan pocos
         texto(surf, "MOVIMIENTOS", 15, APAGADO, (800, 108), sombra=False, negrita=True)
@@ -2211,23 +2585,40 @@ class Juego(Pantalla):
         remaches(surf, rect, mezclar(BORDE, color, 0.5), 10)
         cx = ANCHO // 2
         if gano:
-            texto(surf, "ENCONTRASTE LA PUERTA", 43, ORO, (cx, rect.y + 34), "midtop", negrita=True)
-            texto(surf, "Nivel %s · llegaste en %d movimiento%s" % (
-                self.nivel["nombre"], p.jugador.movimientos,
-                "" if p.jugador.movimientos == 1 else "s"), 20, APAGADO,
-                  (cx, rect.y + 104), "midtop", sombra=False)
+            texto(surf, "ENCONTRASTE LA PUERTA", 40, ORO, (cx, rect.y + 24), "midtop", negrita=True)
+            estrellas_ganadas = (
+                p.estrellas_conseguidas()
+                if hasattr(p, "estrellas_conseguidas")
+                else max(1, min(3, getattr(p, "estrellas_recogidas", 0)))
+            )
+            for idx_e in range(3):
+                ex_f = cx + (idx_e - 1) * 64
+                ey_f = rect.y + 82
+                ganada = idx_e < estrellas_ganadas
+                if ganada:
+                    dibujar_estrella(surf, ex_f, ey_f, 44, self.t + idx_e * 0.4)
+                else:
+                    pygame.draw.circle(surf, (38, 35, 26), (ex_f, ey_f), 14)
+                    pygame.draw.circle(surf, (96, 88, 62), (ex_f, ey_f), 14, 2)
+            estrellas_txt = " ".join("★" if k < estrellas_ganadas else "☆" for k in range(3))
+            texto(surf, "%s  ·  Nivel %s (%d mov.)" % (
+                estrellas_txt, self.nivel["nombre"], p.jugador.movimientos), 18, ORO,
+                  (cx, rect.y + 114), "midtop", negrita=True)
             sobrantes = p.jugador.movimientos_restantes()
+            est_recogidas = getattr(p, "estrellas_recogidas", 0)
             filas = [("Base del nivel", "+%d" % self.nivel["base"]),
                      ("Movimientos sobrantes (%d × %d)" % (sobrantes, PUNTOS_POR_MOVIMIENTO_SOBRANTE),
-                      "+%d" % (sobrantes * PUNTOS_POR_MOVIMIENTO_SOBRANTE))]
+                      "+%d" % (sobrantes * PUNTOS_POR_MOVIMIENTO_SOBRANTE)),
+                     ("Estrellas recogidas (%d × 150)" % est_recogidas,
+                      "+%d" % (est_recogidas * 150))]
             for i, (a, b) in enumerate(filas):
-                y = rect.y + 152 + i * 32
-                texto(surf, a, 20, TEXTO, (rect.x + 60, y), sombra=False)
-                texto(surf, b, 20, VERDE, (rect.right - 60, y), "topright", sombra=False, negrita=True)
-            separador(surf, rect.x + 50, rect.right - 50, rect.y + 224, BORDE)
-            texto(surf, "PUNTAJE", 26, ORO, (rect.x + 60, rect.y + 240), negrita=True)
+                y = rect.y + 146 + i * 26
+                texto(surf, a, 18, TEXTO, (rect.x + 60, y), sombra=False)
+                texto(surf, b, 18, VERDE, (rect.right - 60, y), "topright", sombra=False, negrita=True)
+            separador(surf, rect.x + 50, rect.right - 50, rect.y + 230, BORDE)
+            texto(surf, "PUNTAJE", 26, ORO, (rect.x + 60, rect.y + 242), negrita=True)
             mostrado = int(p.puntaje() * self._ease(min(1.0, self.t_fin / 1.2)))   # el puntaje sube
-            texto(surf, str(mostrado), 48, ORO, (rect.right - 60, rect.y + 226), "topright",
+            texto(surf, str(mostrado), 48, ORO, (rect.right - 60, rect.y + 228), "topright",
                   negrita=True)
             if self.modo == "nombre":
                 texto(surf, "Escribe tu nombre para guardarlo en el ranking", 18, APAGADO,
@@ -2785,3 +3176,349 @@ class Reglas(Pantalla):
                 linea = prueba
         texto(surf, linea, tam, color, (pos[0], y), sombra=False)
         return y + tam + 10
+
+
+# =====================================================================================
+#  PANTALLA DE INVENTARIO Y CÓDICE OCULTO
+# =====================================================================================
+class PantallaInventario(Pantalla):
+    """
+    Pantalla interactiva de Inventario y Códice Oculto (accesible con I o Tab).
+    - Panel Izquierdo: Silueta del Viajero y sus 3 ranuras equipadas (Arma, Armadura, Pasiva).
+    - Panel Central: Cuadrícula por categorías (Armas, Armaduras, Habilidades) con contador
+      "Colección: X / Y Descubiertos" y objetos ocultos en penumbra con candado y "???".
+    - Panel Derecho: Ficha detallada del ítem seleccionado y botón "Equipar".
+    """
+
+    NOMBRES_CATEGORIA = {
+        CATEGORIA_ARMA: "ARMAS",
+        CATEGORIA_ARMADURA: "ARMADURAS",
+        CATEGORIA_HABILIDAD: "HABILIDADES",
+    }
+
+    def __init__(self, app, volver=None):
+        super().__init__(app)
+        self.volver = volver or (lambda: Campamento(app))
+        self.inventario = _obtener_inventario(app)
+        self.particulas = Particulas()
+        self.mensaje = ""
+        self.mensaje_tiempo = 0.0
+        self.coleccion = []
+        self.casillas = []          # lista de (pygame.Rect, item_dict)
+        self.ranuras_equipadas = [] # lista de (pygame.Rect, etiqueta_ranura, id_item)
+        self.indice_sel = 0
+
+        self.b_equipar = Boton("Equipar", (820, 554, 220, 46), self.equipar_seleccionado,
+                               "Enter", ORO, 20)
+        self.b_volver = Boton("Volver", (ANCHO // 2 - 110, 646, 220, 48), self.salir,
+                              "Esc", APAGADO, 21)
+        self._sincronizar_coleccion()
+
+    def _esta_equipado(self, id_item):
+        """Indica si `id_item` está equipado en alguna de las 3 ranuras del viajero."""
+        inv = self.inventario
+        return id_item in (
+            getattr(inv, "arma_equipada", None),
+            getattr(inv, "armadura_equipada", None),
+            getattr(inv, "habilidad_equipada", None),
+        )
+
+    def _sincronizar_coleccion(self):
+        """Construye la cuadrícula del códice agrupada en las 3 categorías y las 3 ranuras activas."""
+        raw = self.inventario.obtener_coleccion()
+        orden_cat = (CATEGORIA_ARMA, CATEGORIA_ARMADURA, CATEGORIA_HABILIDAD)
+        agrupados = {cat: [] for cat in orden_cat}
+        for item in raw:
+            cat = item.get("categoria", CATEGORIA_ARMA)
+            agrupados.setdefault(cat, []).append(item)
+
+        self.coleccion = []
+        self.casillas = []
+        base_x = 330
+        ancho_celda, alto_celda = 132, 92
+        espacio_x = 14
+        filas_y = (224, 356, 488)
+
+        for fila_idx, cat in enumerate(orden_cat):
+            items_cat = agrupados.get(cat, [])
+            y = filas_y[fila_idx]
+            for col_idx, item in enumerate(items_cat[:3]):
+                x = base_x + col_idx * (ancho_celda + espacio_x)
+                rect = pygame.Rect(x, y, ancho_celda, alto_celda)
+                item_copia = dict(item)
+                item_copia["equipado"] = self._esta_equipado(item_copia.get("id"))
+                self.coleccion.append(item_copia)
+                self.casillas.append((rect, item_copia))
+
+        if self.coleccion:
+            self.indice_sel = max(0, min(self.indice_sel, len(self.coleccion) - 1))
+
+        inv = self.inventario
+        definiciones_ranuras = [
+            ("Arma", getattr(inv, "arma_equipada", "espada_ceniza")),
+            ("Armadura", getattr(inv, "armadura_equipada", "manto_viajero")),
+            ("Pasiva", getattr(inv, "habilidad_equipada", "paso_ligero")),
+        ]
+        self.ranuras_equipadas = []
+        for i, (etiqueta, id_eq) in enumerate(definiciones_ranuras):
+            rect_r = pygame.Rect(48, 366 + i * 78, 224, 66)
+            self.ranuras_equipadas.append((rect_r, etiqueta, id_eq))
+
+        self._actualizar_boton_equipar()
+
+    def _item_seleccionado(self):
+        """Retorna el diccionario del ítem actualmente seleccionado en el códice."""
+        if not self.coleccion:
+            return None
+        return self.coleccion[self.indice_sel]
+
+    def _actualizar_boton_equipar(self):
+        """Actualiza el texto y estado habilitado del botón Equipar según el ítem seleccionado."""
+        item = self._item_seleccionado()
+        if item is None or not item.get("descubierto", False):
+            self.b_equipar.etiqueta = "Bloqueado"
+            self.b_equipar.habilitado = False
+        elif self._esta_equipado(item.get("id")):
+            self.b_equipar.etiqueta = "Equipado"
+            self.b_equipar.habilitado = False
+        else:
+            self.b_equipar.etiqueta = "Equipar"
+            self.b_equipar.habilitado = True
+
+    def equipar_seleccionado(self):
+        """Equipa el objeto seleccionado si ya fue descubierto."""
+        item = self._item_seleccionado()
+        if item is None or not item.get("descubierto", False):
+            self.app.sonidos.reproducir("pared")
+            return
+        id_item = item.get("id")
+        if self.inventario.equipar(id_item):
+            self.app.sonidos.reproducir("guardar")
+            self.mensaje = "¡Equipado: %s!" % item.get("nombre", "")
+            self.mensaje_tiempo = 2.4
+            self.particulas.emitir(930, 260, ORO, 20, 110, 0.85, 3)
+            self.app.guardar_checkpoint(self.app.punto_guardado or (550.0, 596.0))
+            self._sincronizar_coleccion()
+
+    def salir(self):
+        """Regresa a la pantalla previa (Juego o Campamento)."""
+        self.app.ir_a(self.volver())
+
+    def evento(self, e):
+        """Maneja clics en la cuadrícula/ranuras, navegación por teclado y tecla Esc/I/Tab."""
+        if self._clics(e, [self.b_equipar, self.b_volver]):
+            return
+        if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+            for idx, (rect, _) in enumerate(self.casillas):
+                if rect.collidepoint(e.pos):
+                    self.indice_sel = idx
+                    self._actualizar_boton_equipar()
+                    self.app.sonidos.reproducir("clic")
+                    return
+            for rect_r, _, id_eq in self.ranuras_equipadas:
+                if rect_r.collidepoint(e.pos):
+                    for idx, (_, it) in enumerate(self.casillas):
+                        if it.get("id") == id_eq:
+                            self.indice_sel = idx
+                            self._actualizar_boton_equipar()
+                            self.app.sonidos.reproducir("clic")
+                            return
+        elif e.type == pygame.KEYDOWN:
+            if e.key in (pygame.K_ESCAPE, pygame.K_i, pygame.K_TAB, pygame.K_BACKSPACE):
+                self.app.sonidos.reproducir("clic")
+                self.salir()
+            elif e.key in (pygame.K_RIGHT, pygame.K_d) and self.coleccion:
+                self.indice_sel = (self.indice_sel + 1) % len(self.coleccion)
+                self._actualizar_boton_equipar()
+                self.app.sonidos.reproducir("clic")
+            elif e.key in (pygame.K_LEFT, pygame.K_a) and self.coleccion:
+                self.indice_sel = (self.indice_sel - 1) % len(self.coleccion)
+                self._actualizar_boton_equipar()
+                self.app.sonidos.reproducir("clic")
+            elif e.key in (pygame.K_DOWN, pygame.K_s) and self.coleccion:
+                self.indice_sel = (self.indice_sel + 3) % len(self.coleccion)
+                self._actualizar_boton_equipar()
+                self.app.sonidos.reproducir("clic")
+            elif e.key in (pygame.K_UP, pygame.K_w) and self.coleccion:
+                self.indice_sel = (self.indice_sel - 3) % len(self.coleccion)
+                self._actualizar_boton_equipar()
+                self.app.sonidos.reproducir("clic")
+            elif e.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_e):
+                if self.b_equipar.habilitado:
+                    self.equipar_seleccionado()
+
+    def actualizar(self, dt):
+        """Actualiza animaciones, partículas y botones del inventario."""
+        super().actualizar(dt)
+        mouse = pygame.mouse.get_pos()
+        self.b_equipar.actualizar(dt, mouse)
+        self.b_volver.actualizar(dt, mouse)
+        self.particulas.actualizar(dt)
+        if self.mensaje_tiempo > 0:
+            self.mensaje_tiempo = max(0.0, self.mensaje_tiempo - dt)
+
+    def dibujar(self, surf):
+        """Dibuja los tres paneles del Inventario y Códice Oculto."""
+        self.app.fondo.dibujar(surf, self.t)
+
+        # Cabecera principal
+        texto(surf, "INVENTARIO Y CÓDICE OCULTO", 38, ORO, (ANCHO // 2, 26),
+              "midtop", negrita=True)
+        texto(surf, "Equipa tus reliquias y descubre los artefactos ocultos en los cofres del laberinto",
+              16, APAGADO, (ANCHO // 2, 72), "midtop", sombra=False)
+
+        # -----------------------------------------------------------------
+        # 1. PANEL IZQUIERDO: Silueta del Viajero + 3 Ranuras Equipadas
+        # -----------------------------------------------------------------
+        p_izq = pygame.Rect(30, 108, 260, 520)
+        panel(surf, p_izq, 232, mezclar(BORDE, ORO, 0.35))
+        remaches(surf, p_izq, BORDE, 8)
+        texto(surf, "EL VIAJERO", 20, ORO, (p_izq.centerx, p_izq.y + 18), "midtop", negrita=True)
+        separador(surf, p_izq.x + 18, p_izq.right - 18, p_izq.y + 48, BORDE)
+
+        # Pedestal y silueta animada del Viajero
+        pedestal = pygame.Rect(p_izq.x + 36, p_izq.y + 62, p_izq.w - 72, 168)
+        pygame.draw.rect(surf, (14, 16, 13), pedestal, border_radius=8)
+        pygame.draw.rect(surf, (78, 72, 48), pedestal, 2, border_radius=8)
+        brillo(surf, pedestal.center, 76, ORO, 0.22 + 0.05 * math.sin(self.t * 3.0))
+        dibujar_jugador(surf, pedestal.centerx, pedestal.centery + 18, 92, self.t,
+                        antorcha=True, direccion="abajo", andando=False)
+
+        oro_total = getattr(self.inventario, "oro", 0)
+        texto(surf, "Oro acumulado: %d" % oro_total, 14, ORO,
+              (p_izq.centerx, pedestal.bottom + 10), "midtop", negrita=True, sombra=False)
+
+        # 3 Ranuras equipadas (Arma, Armadura, Pasiva)
+        for rect_r, etiqueta_ranura, id_eq in self.ranuras_equipadas:
+            datos_eq = CATALOGO_OBJETOS.get(id_eq, {})
+            nombre_eq = datos_eq.get("nombre", "Sin equipar")
+            icono_eq = datos_eq.get("icono", "espada")
+            rareza_eq = datos_eq.get("rareza", "Común")
+            col_rar = COLORES_RAREZA.get(rareza_eq, ORO)
+
+            pygame.draw.rect(surf, (24, 26, 20), rect_r, border_radius=6)
+            pygame.draw.rect(surf, mezclar(BORDE, col_rar, 0.55), rect_r, 2, border_radius=6)
+            ico_box = pygame.Rect(rect_r.x + 8, rect_r.y + 8, 50, 50)
+            pygame.draw.rect(surf, (16, 18, 14), ico_box, border_radius=5)
+            dibujar_icono_item(surf, ico_box, icono_eq, descubierto=True, color_acento=col_rar)
+            texto(surf, etiqueta_ranura.upper(), 12, APAGADO,
+                  (ico_box.right + 12, rect_r.y + 12), sombra=False, negrita=True)
+            texto_ajustado(surf, nombre_eq, 15, TEXTO,
+                           (ico_box.right + 12, rect_r.y + 32), rect_r.w - 78, negrita=True)
+
+        # -----------------------------------------------------------------
+        # 2. PANEL CENTRAL: Cuadrícula de Categorías y Avance del Códice
+        # -----------------------------------------------------------------
+        p_cen = pygame.Rect(306, 108, 468, 520)
+        panel(surf, p_cen, 232, mezclar(BORDE, CIAN, 0.35))
+        remaches(surf, p_cen, BORDE, 8)
+        texto(surf, "CÓDICE DE ARTEFACTOS", 20, CIAN, (p_cen.x + 24, p_cen.y + 18), negrita=True)
+
+        total_items = len(self.coleccion)
+        descubiertos = sum(1 for it in self.coleccion if it.get("descubierto", False))
+        avance_txt = "Colección: %d / %d Descubiertos" % (descubiertos, total_items)
+        texto(surf, avance_txt, 15, ORO, (p_cen.x + 24, p_cen.y + 48), negrita=True, sombra=False)
+
+        # Barra de progreso de colección
+        barra_prog = pygame.Rect(p_cen.x + 24, p_cen.y + 72, p_cen.w - 48, 10)
+        pygame.draw.rect(surf, (14, 15, 11), barra_prog, border_radius=5)
+        if total_items > 0 and descubiertos > 0:
+            ancho_p = max(8, int(barra_prog.w * (descubiertos / total_items)))
+            pygame.draw.rect(surf, ORO, (barra_prog.x, barra_prog.y, ancho_p, barra_prog.h),
+                             border_radius=5)
+        pygame.draw.rect(surf, BORDE, barra_prog, 1, border_radius=5)
+
+        # Encabezados de las 3 categorías y dibujo de cada ranura
+        etiquetas_filas = [
+            ("ARMAS", 198),
+            ("ARMADURAS", 330),
+            ("HABILIDADES PASIVAS", 462),
+        ]
+        for titulo_cat, y_cat in etiquetas_filas:
+            texto(surf, titulo_cat, 13, APAGADO, (330, y_cat), negrita=True, sombra=False)
+            pygame.draw.line(surf, (62, 58, 42), (330, y_cat + 18), (750, y_cat + 18), 1)
+
+        for idx, (rect_c, item) in enumerate(self.casillas):
+            dibujar_ranura_item(
+                surf,
+                rect_c,
+                item,
+                seleccionado=(idx == self.indice_sel),
+                equipado=self._esta_equipado(item.get("id")),
+            )
+
+        # -----------------------------------------------------------------
+        # 3. PANEL DERECHO: Ficha del Ítem Seleccionado
+        # -----------------------------------------------------------------
+        p_der = pygame.Rect(790, 108, 280, 520)
+        panel(surf, p_der, 232, mezclar(BORDE, ORO, 0.45))
+        remaches(surf, p_der, BORDE, 8)
+        texto(surf, "FICHA DE OBJETO", 20, ORO, (p_der.centerx, p_der.y + 18),
+              "midtop", negrita=True)
+        separador(surf, p_der.x + 18, p_der.right - 18, p_der.y + 48, BORDE)
+
+        item_sel = self._item_seleccionado()
+        if item_sel is not None:
+            desc = bool(item_sel.get("descubierto", False))
+            rareza = item_sel.get("rareza", "Común")
+            col_rar = COLORES_RAREZA.get(rareza, ORO) if desc else (110, 104, 84)
+
+            marco_ico = pygame.Rect(p_der.centerx - 54, p_der.y + 66, 108, 108)
+            pygame.draw.rect(surf, (16, 18, 14), marco_ico, border_radius=8)
+            pygame.draw.rect(surf, col_rar, marco_ico, 2, border_radius=8)
+            dibujar_icono_item(surf, marco_ico.inflate(-16, -16),
+                               item_sel.get("icono", "incognita"),
+                               descubierto=desc, color_acento=col_rar)
+
+            if desc:
+                nombre_mostrar = item_sel.get("nombre", "Artefacto")
+                cat_clave = item_sel.get("categoria", CATEGORIA_ARMA)
+                cat_txt = self.NOMBRES_CATEGORIA.get(cat_clave, "ARTEFACTO")
+                texto_ajustado(surf, nombre_mostrar, 22, TEXTO,
+                               (p_der.centerx, marco_ico.bottom + 20), p_der.w - 28,
+                               "midtop", negrita=True)
+                texto(surf, "%s  ·  Rareza %s" % (cat_txt, rareza), 13, col_rar,
+                      (p_der.centerx, marco_ico.bottom + 50), "midtop", negrita=True, sombra=False)
+                separador(surf, p_der.x + 22, p_der.right - 22, marco_ico.bottom + 76, BORDE)
+                lore = item_sel.get("descripcion", "")
+                self._dibujar_parrafo(surf, lore, 15,
+                                      (p_der.x + 22, marco_ico.bottom + 92),
+                                      p_der.w - 44, TEXTO)
+            else:
+                texto(surf, "???", 26, (140, 132, 108),
+                      (p_der.centerx, marco_ico.bottom + 20), "midtop", negrita=True)
+                texto(surf, "CÓDICE OCULTO", 13, APAGADO,
+                      (p_der.centerx, marco_ico.bottom + 52), "midtop", negrita=True, sombra=False)
+                separador(surf, p_der.x + 22, p_der.right - 22, marco_ico.bottom + 76, BORDE)
+                msg_oculto = (
+                    "Artefacto desconocido. Abre cofres en el laberinto para descubrirlo."
+                )
+                self._dibujar_parrafo(surf, msg_oculto, 15,
+                                      (p_der.x + 22, marco_ico.bottom + 92),
+                                      p_der.w - 44, APAGADO)
+
+        self.b_equipar.dibujar(surf)
+        self.b_volver.dibujar(surf)
+        self.particulas.dibujar(surf)
+
+        if self.mensaje_tiempo > 0 and self.mensaje:
+            texto(surf, self.mensaje, 15, VERDE, (p_der.centerx, p_der.bottom - 88),
+                  "midtop", negrita=True)
+
+    @staticmethod
+    def _dibujar_parrafo(surf, s, tam, pos, ancho, color=TEXTO):
+        """Renderiza un párrafo multi-línea ajustado al ancho del panel."""
+        f = fuente(tam)
+        linea, y = "", pos[1]
+        for palabra in s.split():
+            prueba = (linea + " " + palabra).strip()
+            if f.size(prueba)[0] > ancho and linea:
+                texto(surf, linea, tam, color, (pos[0], y), sombra=False)
+                y += tam + 6
+                linea = palabra
+            else:
+                linea = prueba
+        if linea:
+            texto(surf, linea, tam, color, (pos[0], y), sombra=False)
+        return y + tam + 8
+

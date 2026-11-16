@@ -44,6 +44,7 @@ NIVELES = {
 }
 
 PUNTOS_POR_MOVIMIENTO_SOBRANTE = 10
+PUNTOS_POR_ESTRELLA = 150
 DISTANCIA_MINIMA_ENTRADA = 6       # los enemigos no patrullan pegados a la entrada
 
 
@@ -83,7 +84,111 @@ class Partida:
         self.historial = Historial()
         self.estado = JUGANDO
         self.pista_actual = None
+        self.estrellas_recogidas = 0
+        self.oro_partida = 0
+        self.estrellas = self._crear_estrellas(3)
+        self.cofres = self._crear_cofres(1 if nivel["filas"] < 12 else 2)
         self._registrar()
+
+    # ---------------- estrellas y cofres ----------------
+    def recoger_estrella(self):
+        """
+        Si el jugador pisa una estrella la suma a estrellas_recogidas y la remueve.
+
+        Devuelve: True si recogió una estrella; False si no.
+        """
+        pos = self.jugador.posicion
+        if pos in self.estrellas:
+            self.estrellas.remove(pos)
+            self.estrellas_recogidas += 1
+            return True
+        return False
+
+    def abrir_cofre(self, inventario=None):
+        """
+        Si el jugador pisa un cofre cerrado lo abre y entrega el botín al inventario.
+
+        Recibe:
+            inventario: Inventario que recibe el ítem (o el oro). Opcional.
+        Devuelve:
+            El botín (id de ítem o cantidad de oro), o None si no había cofre cerrado.
+        """
+        pos = self.jugador.posicion
+        for cofre in self.cofres:
+            if cofre["casilla"] == pos and not cofre["abierto"]:
+                cofre["abierto"] = True
+                inv = inventario or getattr(self, "inventario", None)
+                if inv is not None:
+                    botin = inv.sortear_botin()
+                    if isinstance(botin, str):
+                        inv.descubrir_item(botin)
+                    else:
+                        inv.oro += botin
+                        self.oro_partida += botin
+                else:
+                    botin = cofre.get("contenido", "oro_50")
+                cofre["contenido"] = botin
+                return botin
+        return None
+
+    def estrellas_conseguidas(self):
+        """
+        Calificación de 0 a 3: 1 por ganar, 2 si además hay 2+ estrellas o 1 cofre
+        abierto, 3 si se recogieron las 3 estrellas.
+        """
+        if self.estado != GANO:
+            return 0
+        if self.estrellas_recogidas >= 3:
+            return 3
+        if self.estrellas_recogidas >= 2 or any(c["abierto"] for c in self.cofres):
+            return 2
+        return 1
+
+    def _casillas_ramal(self):
+        """
+        (Interno) Casillas transitables fuera de la ruta óptima, ordenadas con los
+        callejones sin salida primero y, entre ellos, los más lejanos a la ruta.
+        Devuelve: lista de (casilla, es_callejon, distancia).
+        """
+        lab = self.laberinto
+        ruta = set(self.solucion)
+        prohibidas = ruta | {lab.entrada, lab.salida}
+        resultado = []
+        for f in range(lab.alto):
+            for c in range(lab.ancho):
+                if not lab.es_transitable(f, c) or (f, c) in prohibidas:
+                    continue
+                vecinos = sum(lab.es_transitable(f + df, c + dc)
+                              for df, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+                dist = min(abs(f - rf) + abs(c - rc) for rf, rc in ruta)
+                resultado.append(((f, c), vecinos == 1, dist))
+        return resultado
+
+    def _elegir_casillas(self, cantidad, ocupadas, separacion):
+        """(Interno) Elige casillas de ramales, preferiblemente callejones, separadas."""
+        candidatas = [x for x in self._casillas_ramal() if x[0] not in ocupadas]
+        self._azar.shuffle(candidatas)
+        candidatas.sort(key=lambda x: (not x[1], -x[2]))
+        elegidas = []
+        for minimo in (separacion, 1, 0):
+            for casilla, _, _ in candidatas:
+                if len(elegidas) >= cantidad:
+                    break
+                if casilla in elegidas:
+                    continue
+                if all(abs(casilla[0] - e[0]) + abs(casilla[1] - e[1]) >= minimo
+                       for e in elegidas):
+                    elegidas.append(casilla)
+        return elegidas
+
+    def _crear_estrellas(self, cantidad):
+        """(Interno) Coloca las estrellas en ramales ciegos fuera de la ruta óptima."""
+        return self._elegir_casillas(cantidad, set(), 4)
+
+    def _crear_cofres(self, cantidad):
+        """(Interno) Coloca cofres cerrados en ramales secundarios, sin pisar estrellas."""
+        casillas = self._elegir_casillas(cantidad, set(self.estrellas), 4)
+        return [{"casilla": c, "abierto": False, "contenido": "item"} for c in casillas]
 
     # ---------------- acciones del jugador ----------------
     def mover(self, direccion):
@@ -166,7 +271,9 @@ class Partida:
         if self.estado != GANO:
             return 0
         return (self.nivel["base"]
-                + self.jugador.movimientos_restantes() * PUNTOS_POR_MOVIMIENTO_SOBRANTE)
+                + self.jugador.movimientos_restantes() * PUNTOS_POR_MOVIMIENTO_SOBRANTE
+                + self.estrellas_recogidas * PUNTOS_POR_ESTRELLA
+                + self.oro_partida)
 
     def posiciones_enemigos(self):
         """
