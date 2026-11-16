@@ -1,42 +1,41 @@
-# Plan de Orquestación Multi-Agente: Movimiento Autónomo en Tiempo Real e Inteligencia Escalar de Enemigos por Dificultad
+# Plan de Orquestación Multi-Agente: Sistema de Coleccionables (Estrellas y Cofres), Códice Oculto (Objetos en Incógnita) e Inventario de Equipamiento
 
 **Proyecto:** *Laberinto: El Umbral de Ceniza* (`lab_v2`)  
-**Módulos Afectados:** Motor de IA (`juego/enemigo.py`), Núcleo de Partida (`juego/partida.py`), Ciclo de Pantallas (`interfaz/pantallas.py`), Efectos Ambientales (`interfaz/ambiente_laberinto.py`) y Pruebas Unitarias (`pruebas/test_enemigo.py`, `pruebas/test_partida.py`).  
+**Módulos Afectados:** Motor de Progresión (`juego/inventario.py`), Ciclo de Partida y Generación (`juego/partida.py`), Renderizado Gráfico (`interfaz/render.py`), Pantallas e Interfaz (`interfaz/pantallas.py`) y Banco de Pruebas (`pruebas/test_inventario.py`, `pruebas/test_partida.py`).  
 **Objetivo Fundamental:**
-1. **Desacoplar el movimiento de los enemigos del turno del jugador:** Los enemigos estándar ya no esperarán a que el jugador presione una tecla para avanzar; se moverán de forma continua y autónoma en tiempo real acumulando delta time ($dt$).
-2. **Implementar Inteligencia de Caza Adaptativa (Máquina de Estados Finitos):** Los enemigos alternarán entre estados de `PATRULLA` (recorriendo su `ListaCircular`), `ALERTA` y `PERSECUCION` (calculando la ruta más corta hacia el jugador mediante BFS en las casillas transitables del laberinto).
-3. **Escalado Dinámico por Dificultad:** La velocidad de paso ($dt$) y la agresividad/rango de detección de los enemigos variarán según el nivel de dificultad seleccionado (`Fácil`, `Medio`, `Difícil`).
-4. **Preservación Estricta de la Mecánica del Eco / Sombra:** La sombra (`Eco`, basado en `Cola`) **DEBE PERMANECER estrictamente por turnos**, avanzando únicamente cuando el jugador se mueva o espere turno, conservando su naturaleza de reflejo temporal.
-5. **Detección Continua de Colisiones e Interpolación Visual Suave:** Si un enemigo alcanza la casilla del jugador de forma autónoma, el juego finaliza en derrota (`ATRAPADO`), y visualmente los sprites se moverán de forma fluida entre casillas sin saltos discretos ni teletransportes.
+1. **Calificación Estelar y Coleccionables (Riesgo vs. Recompensa):** Distribuir proceduralmente **3 Estrellas** y **Cofres del Tesoro** en ramales secundarios ciegos del laberinto (fuera de la ruta óptima segura), motivando al jugador a adentrarse en territorio de patrulla enemiga. Calificar cada nivel de **★☆☆ (1 estrella)** a **★★★ (3 estrellas)** según su desempeño y recolección.
+2. **Códice de Colección en Incógnita (Objetos Desconocidos):** Implementar un catálogo completo de **Armas**, **Armaduras** y **Habilidades Pasivas**. Al abrir el inventario, los objetos no encontrados se muestran como **siluetas en penumbra con candado y título `???`** ("Objeto no descubierto: busca en los cofres del laberinto"). Esto fomenta el deseo de explorar y rejugar para completar el 100% de la colección.
+3. **Botín de Cofres y Desbloqueo Dinámico:** Al pisar y abrir un cofre en una partida, se revela y desbloquea un nuevo ítem del códice, emitiendo un anuncio destacado en el HUD, confeti/brasas doradas y guardándolo de forma permanente en `checkpoint.json`.
+4. **Pantalla de Inventario y Equipamiento:** Pantalla interactiva (accesible con tecla `I` o `Tab` tanto en el Campamento como durante la partida) que permite al jugador inspeccionar su colección, ver su progreso (ej. *4/12 Objetos Descubiertos*) y equipar 1 Arma, 1 Armadura y 1 Habilidad activa que alteran sus estadísticas de juego.
 
 ---
 
 ## 1. Topología de Agentes y Matriz de Propiedad Estricta (Zero-Conflict)
 
-Para permitir el desarrollo en paralelo sin conflictos de Git ni condiciones de carrera, cada agente opera bajo propiedad exclusiva de archivos disjuntos:
+Cada agente posee la titularidad exclusiva de un conjunto disjunto de archivos, eliminando colisiones de código y permitiendo desarrollo en paralelo:
 
-$$\text{Archivos}(\text{Agent-Enemy-AI}) \cap \text{Archivos}(\text{Agent-UI-GameLoop}) \cap \text{Archivos}(\text{Agent-QA-Tests}) = \emptyset$$
+$$\text{Archivos}(\text{Agent-Economy-Core}) \cap \text{Archivos}(\text{Agent-UI-Inventory}) \cap \text{Archivos}(\text{Agent-QA-Progression}) = \emptyset$$
 
 ```mermaid
 graph TD
-    subgraph "WAVE 1: Implementación Paralela Desacoplada"
-        A1["Agente 1: Agent-Enemy-AI<br/>(Motor de IA, Timer dt, BFS y Dificultad)"]
-        A2["Agente 2: Agent-UI-GameLoop<br/>(Loop dt, Muerte en Vivo e Interpolación)"]
+    subgraph "WAVE 1: Implementación Paralela de Lógica y Visuales"
+        A1["Agente 1: Agent-Economy-Core<br/>(Códice en Incógnita, Inventario, Cofres y Estrellas)"]
+        A2["Agente 2: Agent-UI-Inventory<br/>(Pantalla Inventario, Sprites de Cofre/Estrella y HUD)"]
     end
 
     subgraph "Contratos de Interfaz Compartidos (API Freeze)"
-        C1["lab_v2/juego/enemigo.py<br/>API: Enemigo.actualizar(dt, pos_jugador, lab)<br/>API: Enemigo.avanzar()<br/>API: estados (PATRULLA / PERSECUCION)"]
-        C2["lab_v2/juego/partida.py<br/>API: Partida.actualizar_tiempo(dt)<br/>Config: NIVELES con intervalo_enemigo y rango"]
+        C1["lab_v2/juego/inventario.py<br/>Clase: Inventario<br/>Catálogo: CATALOGO_OBJETOS (Armas, Armaduras, Habilidades)<br/>API: descubrir_item(), equipar(), obtener_coleccion()"]
+        C2["lab_v2/juego/partida.py<br/>API: Partida.estrellas, Partida.cofres<br/>API: Partida.recoger_estrella(), Partida.abrir_cofre()<br/>API: estrellas_conseguidas(), puntaje_total()"]
     end
 
-    subgraph "WAVE 2: Pruebas de Calidad, Integración y Regresión"
-        A3["Agente 3: Agent-QA-Tests<br/>(Validación de Autonomía, Tiempos y No-Regresión 235+)"]
+    subgraph "WAVE 2: Aseguramiento de Calidad y Pruebas"
+        A3["Agente 3: Agent-QA-Progression<br/>(Validación de Desbloqueos, Persistencia y Tests 244+)"]
     end
 
     A1 --> C1
     A1 --> C2
-    C1 -. Consumido en pantalla .-> A2
-    C2 -. Consumido en game loop .-> A2
+    C1 -. Consumido por .-> A2
+    C2 -. Consumido por .-> A2
     C1 --> A3
     C2 --> A3
     A2 --> A3
@@ -46,107 +45,134 @@ graph TD
 
 | Agente | Identificador | Rol Especializado | Modelo Sugerido | Archivos de Escritura Exclusiva | Archivos de Solo Lectura |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Agente 1** | `Agent-Enemy-AI` | Arquitecto de Algoritmos de IA, Grafo BFS y Motor de Juego. | `Claude Sonnet 5.5` | • `lab_v2/juego/enemigo.py`<br>• `lab_v2/juego/partida.py` | • `lab_v2/interfaz/*`<br>• `lab_v2/pruebas/*`<br>• `lab_v2/estructuras/*` |
-| **Agente 2** | `Agent-UI-GameLoop` | Ingeniero de Interfaz, Game Loop Pygame, Interpolación y HUD. | `Gemini 4 Argon` | • `lab_v2/interfaz/pantallas.py`<br>• `lab_v2/interfaz/ambiente_laberinto.py` | • `lab_v2/juego/*`<br>• `lab_v2/pruebas/*`<br>• `lab_v2/datos/*` |
-| **Agente 3** | `Agent-QA-Tests` | Especialista en Validación de Físicas, Mock de Reloj y Test Suites. | `Claude Sonnet 5.5` / `Gemini 4 Hydrogen` | • `lab_v2/pruebas/test_enemigo.py`<br>• `lab_v2/pruebas/test_partida.py` | • Todos los módulos de `lab_v2/juego/*` y `lab_v2/interfaz/*` |
+| **Agente 1** | `Agent-Economy-Core` | Arquitecto de Progresión, Lógica de Ítems, Estructuras y Partida. | `Claude Sonnet 5.5` | • `lab_v2/juego/inventario.py` *(nuevo)*<br>• `lab_v2/juego/partida.py` | • `lab_v2/interfaz/*`<br>• `lab_v2/pruebas/*`<br>• `lab_v2/estructuras/*` |
+| **Agente 2** | `Agent-UI-Inventory` | Ingeniero de Interfaz, Arte de HUD, Renderizado de Cofres/Estrellas. | `Gemini 4 Argon` | • `lab_v2/interfaz/pantallas.py`<br>• `lab_v2/interfaz/render.py` | • `lab_v2/juego/*`<br>• `lab_v2/pruebas/*`<br>• `lab_v2/datos/*` |
+| **Agente 3** | `Agent-QA-Progression` | Especialista en Pruebas de Persistencia, Mocking y No Regresión. | `Claude Sonnet 5.5` / `Gemini 4 Hydrogen` | • `lab_v2/pruebas/test_inventario.py` *(nuevo)*<br>• `lab_v2/pruebas/test_partida.py` | • Todos los módulos de `lab_v2/juego/*` e `lab_v2/interfaz/*` |
 
 ---
 
 ## 2. Contratos de Interfaz Compartidos (API Freeze)
 
-Para que los Agentes 1 y 2 trabajen en paralelo sin desincronizarse, se congelan las siguientes firmas de métodos y configuraciones:
-
-### 2.1. Firma y Comportamiento de `Enemigo` (`lab_v2/juego/enemigo.py`)
+### 2.1. Catálogo e Inventario (`lab_v2/juego/inventario.py`)
 
 ```python
-ESTADO_PATRULLA = "patrulla"
-ESTADO_PERSECUCION = "persecucion"
-ESTADO_RETORNO = "retorno"
+CATEGORIA_ARMA = "arma"
+CATEGORIA_ARMADURA = "armadura"
+CATEGORIA_HABILIDAD = "habilidad"
 
-class Enemigo:
-    def __init__(self, ruta, dificultad="Medio", intervalo_paso=0.75, rango_vision=7):
-        """
-        ruta: ListaCircular original con las casillas de patrulla.
-        dificultad: "Fácil", "Medio" o "Difícil".
-        intervalo_paso: segundos necesarios para acumular 1 paso autónomo.
-        rango_vision: distancia Manhattan/BFS máxima a la que detecta al jugador.
-        """
-        self.ruta = ruta
-        self.ruta.reiniciar_cursor()
-        self.posicion = self.ruta.avanzar()
-        self.pos_anterior = self.posicion
-        self.intervalo_paso = intervalo_paso
-        self.rango_vision = rango_vision
-        self.tiempo_acumulado = 0.0
-        self.estado = ESTADO_PATRULLA
-        self.ruta_persecucion = []  # Cola o lista de casillas calculadas con BFS
-        self.progreso_paso = 0.0    # 0.0 a 1.0 para interpolación visual suave
-
-    def actualizar(self, dt: float, pos_jugador: tuple[int, int], laberinto) -> bool:
-        """
-        Acumula dt. Si tiempo_acumulado >= intervalo_paso:
-        - Evalúa si el jugador está dentro de rango_vision (o si ya está en persecución activa).
-        - Si ve al jugador: estado = ESTADO_PERSECUCION, calcula paso óptimo hacia pos_jugador vía camino_mas_corto (BFS).
-        - Si no lo ve o lo perdió: estado = ESTADO_PATRULLA / RETORNO, avanza según self.ruta (ListaCircular).
-        - Actualiza self.pos_anterior y self.posicion.
-        - Retorna True si dio un paso en este frame, False si solo acumuló tiempo.
-        """
-        ...
-
-    def avanzar(self) -> tuple[int, int]:
-        """
-        Mantiene compatibilidad exacta hacia atrás con pruebas existentes o llamadas forzadas.
-        Da un paso inmediato sobre la ruta circular y reinicia tiempo_acumulado.
-        """
-        ...
-```
-
-### 2.2. Configuración de `NIVELES` y Firma de `Partida` (`lab_v2/juego/partida.py`)
-
-```python
-NIVELES = {
-    "1": {
-        "nombre": "Fácil",
-        "filas": 8, "columnas": 8, "factor": 3.0, "enemigos": 1, "base": 100,
-        "eco": 8, "radar": 4,
-        "intervalo_enemigo": 1.15,  # 1.15 segundos por paso (ritmo pausado y predecible)
-        "rango_enemigo": 4,         # Solo persigue si el jugador se acerca a 4 casillas
+CATALOGO_OBJETOS = {
+    # ---------------- ARMAS ----------------
+    "espada_ceniza": {
+        "id": "espada_ceniza", "categoria": CATEGORIA_ARMA, "nombre": "Espada de Ceniza",
+        "descripcion": "Hoja imbuida con fuego verde. Corta esqueletos frontales.",
+        "rareza": "Común", "desbloqueado_inicio": True, "icono": "espada"
     },
-    "2": {
-        "nombre": "Medio",
-        "filas": 12, "columnas": 12, "factor": 2.5, "enemigos": 2, "base": 200,
-        "eco": 6, "radar": 3,
-        "intervalo_enemigo": 0.75,  # 0.75 segundos por paso (ritmo estándar ágil)
-        "rango_enemigo": 7,         # Detecta en un radio de 7 casillas
+    "daga_sombras": {
+        "id": "daga_sombras", "categoria": CATEGORIA_ARMA, "nombre": "Daga de Sombras",
+        "descripcion": "Ataca en ráfaga circular a enemigos adyacentes a corta distancia.",
+        "rareza": "Rara", "desbloqueado_inicio": False, "icono": "daga"
     },
-    "3": {
-        "nombre": "Difícil",
-        "filas": 16, "columnas": 16, "factor": 2.0, "enemigos": 3, "base": 300,
-        "eco": 5, "radar": 2,
-        "intervalo_enemigo": 0.48,  # 0.48 segundos por paso (implacable y veloz)
-        "rango_enemigo": 12,        # Gran radio de percepción e intercepción
+    "baston_centella": {
+        "id": "baston_centella", "categoria": CATEGORIA_ARMA, "nombre": "Bastón de Centella",
+        "descripcion": "Dispara un destello en línea recta que aturde a un enemigo 3s.",
+        "rareza": "Épica", "desbloqueado_inicio": False, "icono": "baston"
+    },
+    # ---------------- ARMADURAS ----------------
+    "manto_viajero": {
+        "id": "manto_viajero", "categoria": CATEGORIA_ARMADURA, "nombre": "Manto del Viajero",
+        "descripcion": "Prenda ligera de tela reforzada. Atuendo inicial.",
+        "rareza": "Común", "desbloqueado_inicio": True, "icono": "tunica"
+    },
+    "coraza_guardian": {
+        "id": "coraza_guardian", "categoria": CATEGORIA_ARMADURA, "nombre": "Coraza del Guardián",
+        "descripcion": "Armadura de placas rúnicas. Otorga +5 movimientos máximos por nivel.",
+        "rareza": "Rara", "desbloqueado_inicio": False, "icono": "coraza"
+    },
+    "manto_bruma": {
+        "id": "manto_bruma", "categoria": CATEGORIA_ARMADURA, "nombre": "Manto de Bruma",
+        "descripcion": "Camuflaje espectral. Reduce en 2 casillas el radio de visión de los enemigos.",
+        "rareza": "Épica", "desbloqueado_inicio": False, "icono": "manto"
+    },
+    # ---------------- HABILIDADES PASIVAS ----------------
+    "paso_ligero": {
+        "id": "paso_ligero", "categoria": CATEGORIA_HABILIDAD, "nombre": "Paso Ligero",
+        "descripcion": "Desplazamiento ágil en el campamento y mayor fluidez al deslizar muros.",
+        "rareza": "Común", "desbloqueado_inicio": True, "icono": "bota"
+    },
+    "ojo_zahori": {
+        "id": "ojo_zahori", "categoria": CATEGORIA_HABILIDAD, "nombre": "Ojo del Zahorí",
+        "descripcion": "El resplandor de la linterna revela la dirección del cofre más cercano.",
+        "rareza": "Rara", "desbloqueado_inicio": False, "icono": "ojo"
+    },
+    "escudo_eco": {
+        "id": "escudo_eco", "categoria": CATEGORIA_HABILIDAD, "nombre": "Velo contra el Eco",
+        "descripcion": "Retrasa la persecución de tu sombra (+2 pasos de gracia de la Cola).",
+        "rareza": "Épica", "desbloqueado_inicio": False, "icono": "escudo"
     },
 }
 
-class Partida:
-    def actualizar_tiempo(self, dt: float) -> bool:
+class Inventario:
+    def __init__(self, datos_guardados=None):
         """
-        Actualiza el reloj de la partida y el movimiento autónomo de los enemigos.
-        1. Si self.estado != JUGANDO: retorna False.
-        2. Itera sobre self.enemigos y llama a enemigo.actualizar(dt, self.jugador.posicion, self.laberinto).
-        3. Si algún enemigo dio un paso:
-           - Comprueba colisión _chocan() con self.jugador.posicion.
-           - Si colisiona: self.estado = ATRAPADO, self.causa = "enemigo", self._registrar(). Retorna True.
-        4. Retorna False si no hubo cambio de estado terminal.
+        Gestiona la colección de objetos descubiertos y el equipamiento activo.
+        Si datos_guardados es None, desbloquea solo los iniciales.
+        """
+        self.desbloqueados = set()
+        self.arma_equipada = "espada_ceniza"
+        self.armadura_equipada = "manto_viajero"
+        self.habilidad_equipada = "paso_ligero"
+        self.oro = 0
+        self.estrellas_totales = 0
+        ...
+
+    def obtener_coleccion(self) -> list[dict]:
+        """
+        Retorna la lista de todos los objetos del catálogo.
+        Si el ítem NO ha sido descubierto:
+            nombre = "???"
+            descripcion = "Objeto desconocido. Explora los ramales del laberinto y abre cofres para revelarlo."
+            icono = "incognita"
+            descubierto = False
+        Si HA SIDO descubierto:
+            descubierto = True (muestra nombre real, descripción y atributos).
         """
         ...
+
+    def descubrir_item(self, id_item: str) -> bool:
+        """Desbloquea un ítem en el códice. Retorna True si era nuevo."""
+        ...
+
+    def equipar(self, id_item: str) -> bool:
+        """Equipa un ítem descubierto en su ranura correspondiente."""
+        ...
+
+    def to_dict(self) -> dict: ...
+    @classmethod
+    def from_dict(cls, datos: dict) -> "Inventario": ...
 ```
 
-### 2.3. Desacoplamiento de Turnos (`_despues_de_accion` en `partida.py`)
-- Al llamar `mover(direccion)`, `deshacer()` o `esperar()`:
-  - **YA NO SE LLAMA a `enemigo.avanzar()`**: Los enemigos estándar no reaccionan a los pasos del jugador; se rigen por `actualizar_tiempo(dt)`.
-  - **SE MANTIENE el avance del Eco (`self.eco.turno(...)`)**: El Eco avanza únicamente con las acciones del jugador.
-  - Se valida si el jugador pisó la casilla de un enemigo (`self._chocan()`). Si es así, queda atrapado.
+### 2.2. Generación y Recolección en Partida (`lab_v2/juego/partida.py`)
+
+```python
+class Partida:
+    # Atributos añadidos en __init__:
+    # self.estrellas = [(f, c), ...]  # 3 casillas de estrellas en ramales
+    # self.estrellas_recogidas = 0
+    # self.cofres = [{"casilla": (f, c), "abierto": False, "contenido": id_item_o_oro}]
+    # self.cofres_abiertos = 0
+
+    def recoger_estrella(self) -> bool:
+        """Si el jugador está sobre una estrella no recogida, la toma (+150 pts)."""
+        ...
+
+    def abrir_cofre(self) -> dict | None:
+        """Si el jugador está sobre un cofre cerrado, lo abre y entrega el botín."""
+        ...
+
+    def estrellas_conseguidas(self) -> int:
+        """Retorna cuántas estrellas (1, 2 o 3) se han ganado al terminar."""
+        ...
+```
 
 ---
 
@@ -154,176 +180,156 @@ class Partida:
 
 ---
 
-### WAVE 1: Implementación Paralela Desacoplada
+### WAVE 1: Implementación Paralela de Progresión y Gráficos
 
 ```text
-├── [T-01] [Agent-Enemy-AI] Máquina de estados, temporizador dt y búsqueda BFS por dificultad (enemigo.py)
-├── [T-02] [Agent-Enemy-AI] Motor de tiempo real en Partida, colisiones autónomas y aislamiento del Eco (partida.py)
-├── [T-03] [Agent-UI-GameLoop] Bucle dt en Pantalla de Juego, captura en vivo y fin de partida (pantallas.py)
-└── [T-04] [Agent-UI-GameLoop] Interpolación continua de vis_e y alertas sensoriales de peligro (pantallas.py + ambiente)
+├── [T-01] [Agent-Economy-Core] Módulo de Inventario, Códice de Incógnitas y Persistencia (inventario.py)
+├── [T-02] [Agent-Economy-Core] Generación de 3 Estrellas y Cofres con Botín en Partida (partida.py)
+├── [T-03] [Agent-UI-Inventory] Renderizado estético de Estrellas flotantes y Cofres (render.py)
+└── [T-04] [Agent-UI-Inventory] Pantalla de Inventario / Códice Oculto y HUD de Estrellas (pantallas.py)
 ```
 
-#### `[T-01]` Máquina de Estados, Temporizador Acumulativo e Inteligencia BFS en `enemigo.py`
-* **Agente Asignado:** `Agent-Enemy-AI`
+#### `[T-01]` Módulo de Inventario, Códice de Incógnitas y Persistencia
+* **Agente Asignado:** `Agent-Economy-Core`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)`
-* **Archivos Objetivo:** `lab_v2/juego/enemigo.py`
+* **Archivos Objetivo:** `lab_v2/juego/inventario.py`
 * **Dependencias:** Inicio inmediato.
 * **Instrucciones Técnicas:**
-  1. Extender `Enemigo.__init__` para aceptar `dificultad`, `intervalo_paso` y `rango_vision`.
-  2. Implementar acumulador `tiempo_acumulado` y cálculo de `progreso_paso = min(1.0, tiempo_acumulado / intervalo_paso)`.
-  3. En `actualizar(dt, pos_jugador, laberinto)`:
-     - Acumular `dt`. Si `tiempo_acumulado < intervalo_paso`, actualizar solo `progreso_paso` y retornar `False`.
-     - Al vencer el intervalo: decrementar `intervalo_paso` de `tiempo_acumulado`.
-     - Medir distancia Manhattan $d = |f_e - f_j| + |c_e - c_j|$ al jugador.
-     - **Si $d \le \text{rango\_vision}$:**
-       - Usar `camino_mas_corto(laberinto, self.posicion, pos_jugador)`.
-       - Si existe camino válido con longitud $\ge 2$, la siguiente casilla es `camino[1]`.
-       - Cambiar estado a `ESTADO_PERSECUCION`.
-     - **Si $d > \text{rango\_vision}$:**
-       - Si estaba en persecución, buscar retornar a la casilla más próxima de su `ListaCircular` o reanudar el orden circular (`self.ruta.avanzar()`).
-       - Cambiar estado a `ESTADO_PATRULLA`.
-     - Actualizar `self.pos_anterior = self.posicion` y `self.posicion = nueva_casilla`.
-     - Retornar `True`.
-  4. Mantener `avanzar()` exactamente operativo para compatibilidad con código legado o tests sincrónicos.
+  1. Crear `lab_v2/juego/inventario.py` implementando el catálogo estructurado `CATALOGO_OBJETOS` con las 3 categorías (Armas, Armaduras, Habilidades).
+  2. Implementar la clase `Inventario`:
+     - Método `obtener_coleccion()` que enmascare como `"???"` con icono `"incognita"` cualquier objeto no registrado en `self.desbloqueados`.
+     - Métodos `descubrir_item(id_item)` y `equipar(id_item)`.
+     - Serialización limpia `to_dict()` y `from_dict()` compatible con JSON.
+     - Métodos auxiliares para sortear un ítem no descubierto al abrir cofres: si todos fueron descubiertos, entrega una bolsa de oro (50 a 100 de oro).
 * **Criterio de Verificación:**
-  - Instanciar un `Enemigo` con intervalo $0.5\text{ s}$ y alimentarlo con llamadas `actualizar(0.1, ...)`. Al quinto llamado debe dar un paso y reportar cambio de posición.
+  - `Inventario()` nuevo devuelve los 3 ítems iniciales descubiertos y el resto en incógnita (`descubierto=False`, `nombre="???"`). Al llamar `descubrir_item("daga_sombras")`, este pasa a ser visible y equipable.
 
 ---
 
-#### `[T-02]` Motor de Tiempo Real en Partida, Colisiones Autónomas y Aislamiento del Eco en `partida.py`
-* **Agente Asignado:** `Agent-Enemy-AI`
+#### `[T-02]` Generación de 3 Estrellas y Cofres con Botín en Partida
+* **Agente Asignado:** `Agent-Economy-Core`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)`
 * **Archivos Objetivo:** `lab_v2/juego/partida.py`
 * **Dependencias:** `[T-01]`
 * **Instrucciones Técnicas:**
-  1. Actualizar el diccionario `NIVELES` agregando `intervalo_enemigo` y `rango_enemigo` para cada nivel (Fácil: $1.15\text{ s} / 4$, Medio: $0.75\text{ s} / 7$, Difícil: $0.48\text{ s} / 12$).
-  2. En `_crear_enemigos()`, pasar la configuración de dificultad, intervalo y rango al constructor de cada `Enemigo`.
-  3. Modificar `_despues_de_accion()`:
-     - **ELIMINAR** las líneas 219-220 (`for enemigo in self.enemigos: enemigo.avanzar()`). Los enemigos NO deben avanzar al pulsar teclas.
-     - **MANTENER** intacto el avance del Eco (`self._eco_atrapa(anterior, esperando)`), garantizando que la sombra solo dé un paso cuando el jugador actúa.
-     - Mantener la verificación de colisión inicial: si el jugador se mueve hacia la casilla donde ya estaba un enemigo, `self.estado = ATRAPADO`.
-  4. Implementar método público `actualizar_tiempo(dt)`:
-     - Si `self.estado != JUGANDO`, retorna `False`.
-     - Itera sobre `self.enemigos` llamando a `e.actualizar(dt, self.jugador.posicion, self.laberinto)`.
-     - Si algún enemigo avanzó de casilla, verifica `if self._chocan():`:
-       - `self.estado = ATRAPADO`
-       - `self.causa = "enemigo"`
-       - `self._registrar()`
-       - Retorna `True`.
-     - Retorna `False`.
+  1. En `Partida.__init__`:
+     - Llamar a `self._crear_estrellas(3)`: buscar 3 casillas transitables en ramales secundarios que no toquen la ruta directa a la salida (`solucion`).
+     - Llamar a `self._crear_cofres(1 if nivel["filas"] < 12 else 2)`: situar cofres en esquinas de ramales lejanos con botín del códice.
+  2. Implementar `recoger_estrella()` y `abrir_cofre()` en el ciclo de movimiento:
+     - Si `self.jugador.posicion` coincide con una estrella, se retira de la lista y suma a `self.estrellas_recogidas`.
+     - Si coincide con un cofre cerrado, cambia su estado a `abierto = True` y entrega su contenido.
+  3. Actualizar `Partida.puntaje()`:
+     $$\text{puntaje} = \text{base} + (\text{movimientos\_restantes} \times 10) + (\text{estrellas\_recogidas} \times 150) + \text{oro\_partida}$$
+  4. Implementar `estrellas_conseguidas()`:
+     - 1 Estrella: Ganar la partida llegando a la meta.
+     - 2 Estrellas: Ganar habiendo recogido al menos 2 estrellas o 1 cofre.
+     - 3 Estrellas: Ganar habiendo recogido las 3 estrellas del nivel.
 * **Criterio de Verificación:**
-  - En una partida en estado `JUGANDO`, si el jugador no ejecuta ninguna acción pero se invoca `partida.actualizar_tiempo(dt)` repetidamente, los enemigos patrullan o persiguen autónomamente y, si alcanzan la posición del jugador, el estado cambia a `ATRAPADO`.
-  - El `Eco` no se mueve hasta que el jugador ejecute `partida.mover()` o `partida.esperar()`.
+  - Toda partida creada genera exactamente 3 estrellas y al menos 1 cofre en ramales válidos sin bloquear el camino principal.
 
 ---
 
-#### `[T-03]` Bucle en Tiempo Real en Pantalla de Juego y Captura en Vivo en `pantallas.py`
-* **Agente Asignado:** `Agent-UI-GameLoop`
+#### `[T-03]` Renderizado Estético de Estrellas Flotantes y Cofres
+* **Agente Asignado:** `Agent-UI-Inventory`
+* **Modelo Recomendado:** `Gemini 4 Argon (Medium)`
+* **Archivos Objetivo:** `lab_v2/interfaz/render.py`
+* **Dependencias:** Inicio inmediato (contratos de firmas visuales).
+* **Instrucciones Técnicas:**
+  1. Implementar `dibujar_estrella(surf, cx, cy, cell, t)`:
+     - Estrella dorada/gema centelleante con levitación senoidal `math.sin(t * 3.5) * 3` px.
+     - Partículas sutiles de polvo dorado a su alrededor.
+  2. Implementar `dibujar_cofre(surf, cx, cy, cell, t, abierto=False)`:
+     - Cofre de madera noble con herrajes de bronce.
+     - Si `abierto=False`: cofre cerrado con brillo ámbar tenue.
+     - Si `abierto=True`: tapa levantada mostrando resplandor interior.
+  3. Implementar `dibujar_icono_item(surf, rect, tipo_icono, descubierto=True)`:
+     - Si `descubierto=False`: dibuja un candado o silueta oscura con un signo `?` centrado en gris/bronce.
+     - Si `descubierto=True`: dibuja el icono distintivo (espada, daga, bastón, túnica, coraza, bota, ojo, escudo).
+* **Criterio de Verificación:**
+  - El módulo compila sin errores y renderiza correctamente estrellas levitantes y cofres en ambas fases (cerrado/abierto).
+
+---
+
+#### `[T-04]` Pantalla de Inventario / Códice Oculto y HUD de Estrellas
+* **Agente Asignado:** `Agent-UI-Inventory`
 * **Modelo Recomendado:** `Gemini 4 Argon (Medium)`
 * **Archivos Objetivo:** `lab_v2/interfaz/pantallas.py`
-* **Dependencias:** Contratos de la Sección 2.
+* **Dependencias:** `[T-01]`, `[T-02]`, `[T-03]`
 * **Instrucciones Técnicas:**
-  1. Localizar `Juego.actualizar(self, dt)` (alrededor de línea 1732).
-  2. Cuando `self.modo == "jugando"` y `self.partida.estado == JUGANDO`:
-     - Invocar `self.partida.actualizar_tiempo(dt)`.
-     - Si `self.partida.estado == ATRAPADO`:
-       - Disparar efectos de derrota inmediata: `self.app.sonidos.reproducir("pared")` o sonido de captura.
-       - Asignar `self.alerta = "¡Un enemigo te ha alcanzado en las sombras!"`.
-       - Sacudir pantalla: `self.shake = max(self.shake, 7.0)`.
-       - Invocar `self._revisar_fin()`.
-  3. Asegurar que las pausas (`self.modo == "pausa"`) detengan el paso de `dt` hacia `partida.actualizar_tiempo()`.
+  1. En `Juego`:
+     - Dibujar las estrellas y cofres en el tablero llamando a las funciones de `render.py`.
+     - Al recoger una estrella o abrir un cofre: reproducir sonido (`guardar`), emitir partículas y mostrar alerta en pantalla (*"¡Has descubierto Daga de Sombras!"*).
+     - Añadir contador visual de 3 estrellas en el HUD superior: `★ ★ ☆`.
+     - Al ganar, la pantalla final muestra las 3 estrellas grandes animándose con fanfarria.
+  2. Crear clase `PantallaInventario(Pantalla)`:
+     - Accesible pulsando la tecla `I` o `Tab` desde `Juego` o `Campamento`.
+     - **Sección Izquierda:** Visualización del Viajero con sus 3 ranuras equipadas (Arma, Armadura, Pasiva).
+     - **Sección Central (El Códice):** Cuadrícula dividida por pestañas o bloques (Armas, Armaduras, Habilidades). Los ítems bloqueados lucen oscuros con `???` y los descubiertos muestran sus colores de rareza.
+     - **Sección Derecha (Ficha de Objeto):** Al hacer clic en un objeto descubierto, muestra su nombre, descripción de historia (*lore*), bonificación y botón `"Equipar"`. Si es incógnita, muestra: *"Aún no has encontrado este artefacto. Explora los cofres del laberinto para descubrirlo."*
+     - Botón de volver o reanudar partida.
 * **Criterio de Verificación:**
-  - Si el jugador se queda inmóvil con el juego abierto, los enemigos continúan moviéndose en la pantalla y, al tocar al jugador, se activa inmediatamente la pantalla de fin de juego por captura.
+  - Pulsar `I` en cualquier momento abre limpiamente el inventario interactivo; se pueden equipar ítems descubiertos y los no descubiertos permanecen en secreto como `???`.
 
 ---
 
-#### `[T-04]` Interpolación Continua de `vis_e` y Alertas Sensoriales en `pantallas.py` y `ambiente_laberinto.py`
-* **Agente Asignado:** `Agent-UI-GameLoop`
-* **Modelo Recomendado:** `Gemini 4 Argon (Medium)`
-* **Archivos Objetivo:**
-  * `lab_v2/interfaz/pantallas.py`
-  * `lab_v2/interfaz/ambiente_laberinto.py`
-* **Dependencias:** `[T-03]`
-* **Instrucciones Técnicas:**
-  1. **Interpolación Cinemática de Enemigos:**
-     - Mejorar el cálculo de `self.vis_e`: en lugar de un acercamiento perezoso dependiente de framerate, usar la velocidad de paso de cada enemigo (`intervalo_paso`):
-       $$v_{\text{lerp}} = \max(8.0, 1.0 / \text{enemigo.intervalo\_paso})$$
-     - Garantizar que los fantasmas deslicen sus coordenadas visuales fluidamente hacia la casilla destino, eliminando cualquier efecto de teletransporte.
-  2. **Alertas de Proximidad y Percepción:**
-     - En `Juego.actualizar()`, calcular la distancia mínima hacia cualquier enemigo en estado `PERSECUCION`.
-     - Si un enemigo entra en persecución dentro de un radio $\le 4$ casillas:
-       - Incrementar gradualmente la viñeta de peligro `self.peligro`.
-       - Emitir pequeñas partículas de humo oscuro o brasas violetas alrededor del enemigo.
-* **Criterio de Verificación:**
-  - Los sprites de los enemigos se deslizan sin saltos bruscos entre casillas y la viñeta de peligro roja se intensifica cuando un enemigo inicia persecución directa hacia el viajero.
-
----
-
-### WAVE 2: Aseguramiento de Calidad, Integración y Regresión
+### WAVE 2: Aseguramiento de Calidad y Suite de Pruebas
 
 ```text
-├── [T-05] [Agent-QA-Tests] Pruebas unitarias de temporizador autónomo y BFS en test_enemigo.py
-├── [T-06] [Agent-QA-Tests] Pruebas de integración de tiempo real y preservación del Eco en test_partida.py
-└── [T-07] [Agent-QA-Tests] Verificación global y pase del 100% de la suite de pruebas (235+ tests)
+├── [T-05] [Agent-QA-Progression] Suite Unitaria de Inventario y Códice Oculto (test_inventario.py)
+├── [T-06] [Agent-QA-Progression] Pruebas de Estrellas, Cofres y Calificación 1-3 en Partida (test_partida.py)
+└── [T-07] [Agent-QA-Progression] Verificación Global de Calidad (Pase 100% de la Suite 250+ tests)
 ```
 
-#### `[T-05]` Pruebas Unitarias de Temporizador Autónomo y BFS en `test_enemigo.py`
-* **Agente Asignado:** `Agent-QA-Tests`
+#### `[T-05]` Suite Unitaria de Inventario y Códice Oculto
+* **Agente Asignado:** `Agent-QA-Progression`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)` o `Gemini 4 Hydrogen (Medium)`
-* **Archivos Objetivo:** `lab_v2/pruebas/test_enemigo.py`
+* **Archivos Objetivo:** `lab_v2/pruebas/test_inventario.py` *(nuevo archivo)*
 * **Dependencias:** `[T-01]` finalizado.
 * **Instrucciones Técnicas:**
-  1. Diseñar tests para el reloj $dt$:
-     - `test_acumulacion_tiempo()`: Comprobar que llamadas a `actualizar(dt)` con $dt < \text{intervalo}$ no cambian la posición.
-     - `test_paso_autonomo_al_vencer_intervalo()`: Comprobar que al acumular $dt \ge \text{intervalo}$, la posición avanza a la siguiente casilla de la ruta.
-  2. Diseñar tests para persecución BFS vs patrulla:
-     - `test_enemigo_detecta_y_persigue_jugador()`: Situar un enemigo a 3 casillas de distancia transitable. Verificar que al vencer el intervalo elige la casilla que acorta la distancia al jugador.
-     - `test_enemigo_ignora_jugador_lejos()`: Situar al jugador fuera de `rango_vision`. Verificar que el enemigo permanece en su ruta de `ListaCircular`.
-  3. Diseñar tests para escalado por dificultad:
-     - Verificar que un enemigo instanciado en nivel "Fácil" tiene menor velocidad de paso que uno en nivel "Difícil".
-  4. Verificar preservación de `test_patrulla_sin_fin()` y `test_ruta_ida_y_vuelta()`.
+  1. `test_inicializacion_descubiertos()`: Comprobar que solo los ítems marcados por defecto están descubiertos y el resto permanece en incógnita.
+  2. `test_mascara_incognita()`: Comprobar que para ítems no descubiertos, `obtener_coleccion()` oculta el nombre real con `"???"` y no filtra descripciones ni atributos.
+  3. `test_descubrir_y_equipar()`: Descubrir un ítem, verificar que `descubierto == True`, equiparlo y verificar que `arma_equipada` / `armadura_equipada` se actualiza.
+  4. `test_no_se_puede_equipar_incognita()`: Intentar equipar un ítem no descubierto; debe retornar `False`.
+  5. `test_serializacion_json()`: Serializar con `to_dict()`, reconstruir con `from_dict()` y comprobar igualdad idéntica de estados.
 * **Criterio de Verificación:**
-  - `python -m unittest lab_v2/pruebas/test_enemigo.py` ejecuta y aprueba todos los casos sin error.
+  - `python -m unittest lab_v2/pruebas/test_inventario.py` ejecuta y aprueba todos los tests.
 
 ---
 
-#### `[T-06]` Pruebas de Integración de Tiempo Real y Preservación del Eco en `test_partida.py`
-* **Agente Asignado:** `Agent-QA-Tests`
+#### `[T-06]` Pruebas de Estrellas, Cofres y Calificación 1-3 en Partida
+* **Agente Asignado:** `Agent-QA-Progression`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)` o `Gemini 4 Hydrogen (Medium)`
 * **Archivos Objetivo:** `lab_v2/pruebas/test_partida.py`
 * **Dependencias:** `[T-02]` finalizado.
 * **Instrucciones Técnicas:**
-  1. Diseñar test `test_enemigos_no_avanzan_con_pasos_del_jugador()`:
-     - Ejecutar `partida.mover(...)`. Verificar que las posiciones de los enemigos no cambian simplemente por el paso del jugador.
-  2. Diseñar test `test_eco_si_avanza_con_pasos_del_jugador()`:
-     - Verificar que el `Eco` continúa acumulando y reproduciendo los pasos del jugador turno a turno.
-  3. Diseñar test `test_enemigos_avanzan_con_actualizar_tiempo()`:
-     - Simular el paso de tiempo llamando `partida.actualizar_tiempo(1.5)`. Verificar que los enemigos han cambiado de casilla de forma autónoma.
-  4. Diseñar test `test_enemigo_atrapa_jugador_inmovil()`:
-     - Situar un enemigo a 1 casilla del jugador inmóvil y avanzar el tiempo hasta que colisione. Verificar que `partida.estado == ATRAPADO` y `partida.causa == "enemigo"`.
+  1. `test_generacion_3_estrellas()`: Comprobar que en cualquier partida válida se generan exactamente 3 estrellas en casillas transitables.
+  2. `test_estrellas_no_bloquean_salida()`: Las estrellas no deben obstaculizar la ruta directa.
+  3. `test_recoleccion_estrella_suma_puntaje()`: Colocar al jugador sobre una estrella; invocar recolección y verificar que `estrellas_recogidas == 1` y aumenta el puntaje.
+  4. `test_abrir_cofre_entrega_botin()`: Colocar al jugador sobre un cofre cerrado; verificar que al abrirlo entrega un ítem o recompensa válida y no puede volver a abrirse.
+  5. `test_escala_estrellas_1_2_3()`: Validar que llegar a la salida sin estrellas otorga 1 estrella, con 2 otorga 2 estrellas, y con 3 otorga la calificación perfecta de 3 estrellas.
 * **Criterio de Verificación:**
-  - `python -m unittest lab_v2/pruebas/test_partida.py` aprueba al 100%.
+  - `python -m unittest lab_v2/pruebas/test_partida.py` aprueba al 100% conservando todos los casos previos.
 
 ---
 
-#### `[T-07]` Verificación Global y Pase del 100% de la Suite de Pruebas
-* **Agente Asignado:** `Agent-QA-Tests`
+#### `[T-07]` Verificación Global de Calidad (Pase 100% de la Suite 250+ Tests)
+* **Agente Asignado:** `Agent-QA-Progression`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)`
 * **Archivos Objetivo:** Solo lectura / Validación.
 * **Dependencias:** `[T-01]` hasta `[T-06]` completados.
 * **Instrucciones Técnicas:**
-  1. Ejecutar el discovery completo con `$env:PYTHONPATH="lab_v2"; python -m unittest discover -s lab_v2/pruebas`.
-  2. Confirmar que los 235 tests originales continúan en estado verde más los nuevos tests unitarios y de integración añadidos.
+  1. Ejecutar `$env:PYTHONPATH="lab_v2"; python -m unittest discover -s lab_v2/pruebas`.
+  2. Comprobar que los 244 tests previos siguen en verde más los nuevos tests de inventario y estrellas.
 * **Criterio de Verificación:**
-  - Salida de consola con `Ran 240+ tests ... OK`.
+  - Consola final: `Ran 250+ tests ... OK`.
 
 ---
 
-## 4. Matriz de Roles y Asignación de Modelos
+## 4. Matriz de Asignación de Modelos
 
 | Agente | Nombre de Rol | Modelo Asignado | Justificación Técnica de Idoneidad |
 | :--- | :--- | :--- | :--- |
-| **Agente 1** | `Agent-Enemy-AI` | **Claude Sonnet 5.5 (Medium)** | Dominio excepcional en teoría de grafos (BFS), algoritmos de búsqueda heurística, estructuras de datos enlazadas y máquinas de estados deterministas sin desbordamientos de pila. |
-| **Agente 2** | `Agent-UI-GameLoop` | **Gemini 4 Argon (Medium)** | Especialista en reactividad de Game Loops en Pygame, cálculos cinemáticos continuos de interpolación ($dt$), integración de audio posicional y gestión de estados de interfaz gráfica. |
-| **Agente 3** | `Agent-QA-Tests` | **Claude Sonnet 5.5 (Medium)** / **Gemini 4 Hydrogen** | Gran rigor analítico en la creación de mocks de tiempo delta, cobertura exhaustiva de casos de borde (esquinas, paredes, cambio de dificultad) y preservación de no-regresión. |
+| **Agente 1** | `Agent-Economy-Core` | **Claude Sonnet 5.5 (Medium)** | Precisión absoluta en modelado de datos de inventario, colecciones ocultas, serialización JSON limpia y colocación procedural en grafos de laberinto. |
+| **Agente 2** | `Agent-UI-Inventory` | **Gemini 4 Argon (Medium)** | Especialista en diseño visual de interfaces de usuario (Pixel Art UI), maquetación de cuadrículas interactivas, renderizado senoidal de sprites y animaciones HUD. |
+| **Agente 3** | `Agent-QA-Progression` | **Claude Sonnet 5.5 (Medium)** / **Gemini 4 Hydrogen** | Rigor exhaustivo en pruebas de enmascaramiento de incógnitas (`???`), validación de contratos entre módulos y garantía estricta de no-regresión. |
 | **Supervisor** | `Orchestrator` | **Orchestrator (Argon)** | Monitorización de dependencias entre oleadas, revisión de contratos de API congelados y resolución de discrepancias. |
