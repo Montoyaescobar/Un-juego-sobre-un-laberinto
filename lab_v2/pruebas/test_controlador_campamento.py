@@ -207,6 +207,28 @@ class TestControladorCampamento(unittest.TestCase):
                 App._archivo_checkpoint = staticmethod(cp_original)
                 modulo_puntajes.ARCHIVO_POR_DEFECTO = antes
 
+    def test_sincronizacion_controlador_y_andando_en_campamento(self):
+        """Verifica que Campamento mantenga sincronizados controlador.posicion y andando al deslizarse [T-03]."""
+        with tempfile.TemporaryDirectory() as carpeta:
+            antes = modulo_puntajes.ARCHIVO_POR_DEFECTO
+            modulo_puntajes.ARCHIVO_POR_DEFECTO = os.path.join(carpeta, "p.txt")
+            cp_original = App._archivo_checkpoint
+            App._archivo_checkpoint = staticmethod(lambda: Path(carpeta) / "cp" / "checkpoint.json")
+            try:
+                app = App()
+                camp = Campamento(app, posicion=(550.0, 560.0))
+                camp.evento(evento_keydown(pygame.K_d))
+                camp.evento(evento_keydown(pygame.K_w))
+                camp.actualizar(1 / 60)
+
+                self.assertEqual(camp.controlador.posicion, list(camp.personaje))
+                self.assertEqual(camp.controlador.direccion, camp.direccion)
+                self.assertEqual(camp.controlador.andando, camp.andando)
+                self.assertTrue(camp.andando)
+            finally:
+                App._archivo_checkpoint = staticmethod(cp_original)
+                modulo_puntajes.ARCHIVO_POR_DEFECTO = antes
+
 
 if __name__ == "__main__":
     unittest.main()

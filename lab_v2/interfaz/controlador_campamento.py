@@ -9,12 +9,15 @@ import pygame
 from interfaz.tema import ANCHO, ALTO
 
 try:
+    from interfaz import colisiones_campamento as _modulo_colisiones
     from interfaz.colisiones_campamento import (
         obtener_bloqueos_campamento,
         obtener_limites_campamento,
         es_posicion_valida,
     )
 except ImportError:
+    _modulo_colisiones = None
+
     # Fallback defensivo mientras Agente 1 finaliza su módulo
     def obtener_limites_campamento() -> tuple[int, int, int, int]:
         """
@@ -57,6 +60,43 @@ except ImportError:
         return not any(caja.colliderect(r) for r in bloqueos)
 
 
+def _invocar_resolver_movimiento(
+    pos_actual: list[float] | tuple[float, float],
+    dx: float,
+    dy: float,
+    dt: float,
+    velocidad: float = 190.0,
+    radio: float = 7.5,
+    permitir_corner_slip: bool = True,
+) -> tuple[float, float, str, bool]:
+    """
+    Invoca resolver_movimiento_campamento respetando el contrato de la Sección 2
+    y manteniendo compatibilidad con firmas previas.
+    """
+    fn = getattr(_modulo_colisiones, "resolver_movimiento_campamento", None)
+    if fn is None:
+        raise RuntimeError("resolver_movimiento_campamento no está disponible")
+    try:
+        return fn(
+            pos_actual,
+            dx,
+            dy,
+            dt,
+            velocidad=velocidad,
+            radio=radio,
+            permitir_corner_slip=permitir_corner_slip,
+        )
+    except TypeError:
+        return fn(
+            pos_actual,
+            dx,
+            dy,
+            dt,
+            velocidad=velocidad,
+            radio=radio,
+        )
+
+
 class ControladorCampamento:
     """
     Gestiona la entrada de teclado, la normalización de velocidad y las físicas
@@ -64,6 +104,7 @@ class ControladorCampamento:
     """
 
     VELOCIDAD_BASE = 190.0
+    RADIO_HITBOX = 7.5
     ANCHO_HITBOX = 18
     ALTO_HITBOX = 16
 
@@ -81,6 +122,9 @@ class ControladorCampamento:
         velocidad: float = VELOCIDAD_BASE,
         limites: tuple[int, int, int, int] = None,
         bloqueos: list[pygame.Rect] = None,
+        radio: float = RADIO_HITBOX,
+        permitir_corner_slip: bool = True,
+        usar_mascara: bool = False,
     ):
         """
         Inicializa el controlador del personaje en el campamento.
@@ -90,9 +134,15 @@ class ControladorCampamento:
             velocidad: rapidez de desplazamiento en píxeles por segundo.
             limites: tupla (min_x, min_y, max_x, max_y) del escenario.
             bloqueos: lista de pygame.Rect con los obstáculos del escenario.
+            radio: radio de la hitbox circular en los pies del viajero (por defecto 7.5 px).
+            permitir_corner_slip: habilita la asistencia de esquinas en colisiones.
+            usar_mascara: delega la física en la máscara de colisiones_campamento.
         """
         self.posicion = [float(posicion[0]), float(posicion[1])]
         self.velocidad = float(velocidad)
+        self.radio = float(radio)
+        self.permitir_corner_slip = bool(permitir_corner_slip)
+        self.usar_mascara = bool(usar_mascara)
         self.limites = limites if limites is not None else obtener_limites_campamento()
         self.bloqueos = list(bloqueos) if bloqueos is not None else obtener_bloqueos_campamento()
         self.teclas: set[int] = set()
@@ -185,12 +235,31 @@ class ControladorCampamento:
         return (dx / norma) * self.velocidad, (dy / norma) * self.velocidad
 
     @staticmethod
-    def calcular_direccion(dx: int, dy: int, direccion_actual: str = "abajo") -> str:
+    def calcular_direccion(
+        dx: float,
+        dy: float,
+        direccion_actual: str = "abajo",
+        efectivo_x: float = None,
+        efectivo_y: float = None,
+    ) -> str:
         """
-        Determina la dirección cardinal del sprite a partir del vector (dx, dy).
+        Determina la dirección cardinal del sprite a partir del vector (dx, dy)
+        y, opcionalmente, del desplazamiento efectivo (efectivo_x, efectivo_y).
+        Si hay movimiento diagonal pero un eje está bloqueado por un muro,
+        orienta el sprite de forma coherente con el eje de deslizamiento efectivo.
         """
         if dx == 0 and dy == 0:
             return direccion_actual
+        if (
+            dx != 0
+            and dy != 0
+            and efectivo_x is not None
+            and efectivo_y is not None
+            and (abs(efectivo_x) > 1e-5 or abs(efectivo_y) > 1e-5)
+        ):
+            if abs(efectivo_x) > abs(efectivo_y) + 1e-4:
+                return "derecha" if efectivo_x > 0 else "izquierda"
+            return "abajo" if efectivo_y > 0 else "arriba"
         if dy < 0 and abs(dy) >= abs(dx):
             return "arriba"
         if dy > 0 and abs(dy) >= abs(dx):
@@ -225,7 +294,7 @@ class ControladorCampamento:
     ) -> tuple[list[float], str, bool]:
         """
         Actualiza la posición del personaje aplicando normalización diagonal y
-        deslizamiento independiente por eje (Wall Sliding).
+        deslizamiento independiente por eje (Wall Sliding), Sub-Stepping y Corner Slipping.
 
         Recibe:
             dt: delta de tiempo en segundos.
@@ -241,30 +310,62 @@ class ControladorCampamento:
             return self.posicion, self.direccion, self.andando
 
         dx, dy = self.vector_entrada(estado_teclas)
-        self.andando = bool(dx or dy)
-        if not self.andando or dt <= 0.0:
+        if (dx == 0 and dy == 0) or dt <= 0.0:
+            self.andando = False
             return self.posicion, self.direccion, self.andando
 
-        self.direccion = self.calcular_direccion(dx, dy, self.direccion)
+        x_inicial, y_inicial = float(self.posicion[0]), float(self.posicion[1])
+        bloqueos_activos = self.bloqueos if bloqueos is None else bloqueos
+        limites_activos = self.limites if limites is None else limites
+
+        if self.usar_mascara and not bloqueos_activos and getattr(_modulo_colisiones, "resolver_movimiento_campamento", None) is not None:
+            nx, ny, _, andando_resuelto = _invocar_resolver_movimiento(
+                self.posicion,
+                dx,
+                dy,
+                dt,
+                velocidad=self.velocidad,
+                radio=self.radio,
+                permitir_corner_slip=self.permitir_corner_slip,
+            )
+            if limites_activos:
+                min_x, min_y, max_x, max_y = limites_activos
+                nx = max(float(min_x), min(float(max_x), float(nx)))
+                ny = max(float(min_y), min(float(max_y), float(ny)))
+            coordenadas = (float(nx), float(ny))
+            self.posicion[:] = coordenadas
+            efectivo_x = coordenadas[0] - x_inicial
+            efectivo_y = coordenadas[1] - y_inicial
+            self.andando = bool(
+                andando_resuelto or abs(efectivo_x) > 1e-6 or abs(efectivo_y) > 1e-6
+            )
+            self.direccion = self.calcular_direccion(
+                dx, dy, self.direccion, efectivo_x, efectivo_y
+            )
+            return self.posicion, self.direccion, self.andando
+
         norma = math.hypot(dx, dy)
         paso_x = (dx / norma) * self.velocidad * dt
         paso_y = (dy / norma) * self.velocidad * dt
-
-        bloqueos_activos = self.bloqueos if bloqueos is None else bloqueos
-        limites_activos = self.limites if limites is None else limites
 
         # Eje X: evaluar desplazamiento horizontal de forma independiente
         if paso_x != 0.0:
             nx = self.posicion[0] + paso_x
             caja_x = self.obtener_caja(nx, self.posicion[1])
             if self._es_valida(nx, self.posicion[1], caja_x, bloqueos_activos, limites_activos):
-                self.posicion[0] = nx
+                self.posicion[0] = float(nx)
 
         # Eje Y: evaluar desplazamiento vertical conservando el nuevo valor de X
         if paso_y != 0.0:
             ny = self.posicion[1] + paso_y
             caja_y = self.obtener_caja(self.posicion[0], ny)
             if self._es_valida(self.posicion[0], ny, caja_y, bloqueos_activos, limites_activos):
-                self.posicion[1] = ny
+                self.posicion[1] = float(ny)
 
+        efectivo_x = self.posicion[0] - x_inicial
+        efectivo_y = self.posicion[1] - y_inicial
+        self.andando = bool(abs(efectivo_x) > 1e-6 or abs(efectivo_y) > 1e-6)
+        self.direccion = self.calcular_direccion(
+            dx, dy, self.direccion, efectivo_x, efectivo_y
+        )
         return self.posicion, self.direccion, self.andando

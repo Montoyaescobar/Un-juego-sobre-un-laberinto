@@ -8,13 +8,13 @@ import pygame
 
 ANCHO, ALTO = 1100, 720
 
-COORD_UMBRAL: tuple[int, int] = (550, 205)
-COORD_HOGUERA: tuple[int, int] = (550, 360)
-COORD_SPAWN: tuple[float, float] = (550.0, 560.0)
-COORD_MARA: tuple[int, int] = (315, 310)
-COORD_NELA: tuple[int, int] = (315, 525)
-COORD_TIZON: tuple[int, int] = (755, 325)
-COORD_IVO: tuple[int, int] = (740, 510)
+COORD_UMBRAL: tuple[int, int] = (544, 210)
+COORD_HOGUERA: tuple[int, int] = (542, 368)
+COORD_SPAWN: tuple[float, float] = (542.0, 590.0)
+COORD_MARA: tuple[int, int] = (355, 345)
+COORD_NELA: tuple[int, int] = (355, 535)
+COORD_TIZON: tuple[int, int] = (720, 345)
+COORD_IVO: tuple[int, int] = (705, 520)
 
 # Compatibilidad con módulos heredados
 CENTRO_HOGUERA = COORD_HOGUERA
@@ -80,13 +80,117 @@ def _libre(mascara: pygame.Mask, px: int, py: int) -> bool:
     return 0 <= px < ANCHO and 0 <= py < ALTO and bool(mascara.get_at((px, py)))
 
 
-def es_posicion_caminable(x: float, y: float, radio: int = 9) -> bool:
-    """Comprueba centro y 4 vertices de la caja del viajero; fuera de limites = False."""
+_DIAG = math.sqrt(2.0) / 2.0
+_EPS_CONTACTO = 1e-6
+_ITER_BUSQUEDA = 5          # 5 iteraciones: precision <= paso/32 (<0.25 px para pasos <= 8 px)
+_MAX_NUDGE = 3.0            # micro-empuje lateral maximo por fotograma (px)
+_MAX_OFFSET_SLIP = 4        # desplazamiento lateral maximo evaluado para esquinas (px)
+
+
+def es_posicion_caminable(x: float, y: float, radio: float = 7.5, muestreo_radial: bool = True) -> bool:
+    """Hitbox redondeada en los pies: centro + 4 cardinales (r) + 4 diagonales (0.707 r).
+
+    Con muestreo_radial=False solo se comprueba el centro. Fuera de limites = False.
+    """
     mascara = _obtener_mascara()
     ix, iy = int(math.floor(x)), int(math.floor(y))
-    r = int(radio)
-    puntos = ((ix, iy), (ix - r, iy - r), (ix + r, iy - r), (ix - r, iy + r), (ix + r, iy + r))
-    return all(_libre(mascara, px, py) for px, py in puntos)
+    if not _libre(mascara, ix, iy):
+        return False
+    if not muestreo_radial:
+        return True
+    r = float(radio)
+    d = r * _DIAG
+    desplazamientos = (
+        (r, 0.0), (-r, 0.0), (0.0, r), (0.0, -r),
+        (d, d), (-d, d), (d, -d), (-d, -d),
+    )
+    for ox, oy in desplazamientos:
+        if not _libre(mascara, int(math.floor(x + ox)), int(math.floor(y + oy))):
+            return False
+    return True
+
+
+def _aproximar_eje(x: float, y: float, paso: float, es_x: bool, radio: float = 7.5) -> float:
+    """Distancia (con signo) transitable en un eje, hasta <= |paso|/32 del contacto.
+
+    Si el paso completo es libre lo devuelve; si no, busqueda binaria de 5 iteraciones.
+    """
+    if paso == 0:
+        return 0.0
+
+    def libre(t: float) -> bool:
+        return es_posicion_caminable(x + t, y, radio) if es_x else es_posicion_caminable(x, y + t, radio)
+
+    if libre(paso):
+        return paso
+    if not libre(0.0):
+        return 0.0  # ya incrustado: no empeorar ni inventar movimiento
+    bajo, alto = 0.0, paso
+    for _ in range(_ITER_BUSQUEDA):
+        medio = (bajo + alto) / 2.0
+        if libre(medio):
+            bajo = medio
+        else:
+            alto = medio
+    return bajo
+
+
+def _corner_slip(x: float, y: float, paso: float, es_x: bool, radio: float) -> tuple[float, float]:
+    """Rodea una esquina en movimiento cardinal bloqueado; devuelve (x, y) nuevos o la original."""
+    # Offsets crecientes; el lado con menor offset gana (esquina mas cercana).
+    for off in range(1, _MAX_OFFSET_SLIP + 1):
+        for signo in (-1.0, 1.0):
+            lat = signo * off
+            if es_x:
+                px, py = x, y + lat
+                libre = es_posicion_caminable(px, py, radio) and es_posicion_caminable(px + paso, py, radio)
+            else:
+                px, py = x + lat, y
+                libre = es_posicion_caminable(px, py, radio) and es_posicion_caminable(px, py + paso, radio)
+            if not libre:
+                continue
+            empuje = signo * min(float(off), _MAX_NUDGE)
+            if es_x:
+                ny = y + _aproximar_eje(x, y, empuje, False, radio)
+                nx = x + _aproximar_eje(x, ny, paso, True, radio)
+                return nx, ny
+            nx = x + _aproximar_eje(x, y, empuje, True, radio)
+            ny = y + _aproximar_eje(nx, y, paso, False, radio)
+            return nx, ny
+    return x, y
+
+
+def calcular_deslizamiento_tangencial(
+    pos_actual: list[float] | tuple[float, float],
+    paso_x: float,
+    paso_y: float,
+    radio: float = 7.5,
+) -> tuple[float, float]:
+    """Wall sliding real: devuelve la nueva (x, y) tras aplicar los pasos deseados.
+
+    Si un eje esta bloqueado, el 100% de la magnitud de velocidad pasa al eje libre.
+    """
+    x, y = float(pos_actual[0]), float(pos_actual[1])
+    modulo = math.hypot(paso_x, paso_y)
+    if paso_x == 0 and paso_y == 0:
+        return x, y
+    if paso_x == 0 or paso_y == 0:
+        mx = _aproximar_eje(x, y, paso_x, True, radio)
+        my = _aproximar_eje(x + mx, y, paso_y, False, radio)
+        return x + mx, y + my
+    # Diagonal: probar ambos ejes con su paso nominal desde la posicion inicial.
+    mx = _aproximar_eje(x, y, paso_x, True, radio)
+    bloq_x = abs(mx) < abs(paso_x) - _EPS_CONTACTO
+    my = _aproximar_eje(x + mx, y, paso_y, False, radio)
+    bloq_y = abs(my) < abs(paso_y) - _EPS_CONTACTO
+    if bloq_x and not bloq_y:
+        # Transferir toda la velocidad al eje Y.
+        sy = math.copysign(modulo, paso_y)
+        my = _aproximar_eje(x + mx, y, sy, False, radio)
+    elif bloq_y and not bloq_x:
+        sx = math.copysign(modulo, paso_x)
+        mx = _aproximar_eje(x, y + my, sx, True, radio)
+    return x + mx, y + my
 
 
 def resolver_movimiento_campamento(
@@ -95,9 +199,10 @@ def resolver_movimiento_campamento(
     dy: float,
     dt: float,
     velocidad: float = 190.0,
-    radio: int = 9,
+    radio: float = 7.5,
+    permitir_corner_slip: bool = True,
 ) -> tuple[float, float, str, bool]:
-    """Movimiento con Wall Sliding: X e Y se evaluan por separado.
+    """Movimiento con sub-stepping, wall sliding a velocidad completa y corner slipping.
 
     Retorna (nueva_x, nueva_y, direccion, andando).
     """
@@ -113,11 +218,14 @@ def resolver_movimiento_campamento(
         direccion = "abajo" if ndy > 0 else "arriba"
     paso_x = ndx * velocidad * dt
     paso_y = ndy * velocidad * dt
-    nueva_x, nueva_y = x, y
-    if paso_x and es_posicion_caminable(x + paso_x, y, radio):
-        nueva_x = x + paso_x
-    if paso_y and es_posicion_caminable(nueva_x, y + paso_y, radio):
-        nueva_y = y + paso_y
+    nueva_x, nueva_y = calcular_deslizamiento_tangencial((x, y), paso_x, paso_y, radio)
+    if permitir_corner_slip and (dx == 0) != (dy == 0):
+        es_x = dx != 0
+        paso = paso_x if es_x else paso_y
+        avance = abs(nueva_x - x) if es_x else abs(nueva_y - y)
+        if avance < abs(paso) - _EPS_CONTACTO:
+            sx, sy = _corner_slip(nueva_x, nueva_y, paso - (nueva_x - x if es_x else nueva_y - y), es_x, radio)
+            nueva_x, nueva_y = sx, sy
     andando = (nueva_x != x) or (nueva_y != y)
     return nueva_x, nueva_y, direccion, andando
 

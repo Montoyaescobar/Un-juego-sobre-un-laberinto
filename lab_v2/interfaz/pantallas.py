@@ -452,13 +452,13 @@ class Campamento(Pantalla):
     def __init__(self, app, posicion=None):
         """Prepara el refugio: personaje, árboles, bloqueos de colisión, armaduras y duende. Recibe: app y posicion inicial (opcional; si no, el punto guardado). Devuelve: nada (constructor)."""
         super().__init__(app)
-        self.personaje = list(posicion or app.punto_guardado or (550.0, 560.0))
+        self.personaje = list(posicion or app.punto_guardado or (542.0, 590.0))
         self.teclas = set()
         self.direccion = "abajo"
         self.andando = False
         self.antorcha = app.antorcha_encendida
         self.fondo_pixel = FondoRefugioPixel()
-        self.fuego_pos = (550, 366) if getattr(self.fondo_pixel, "usa_imagen", False) else (550, 478)
+        self.fuego_pos = (542, 368) if getattr(self.fondo_pixel, "usa_imagen", False) else (550, 478)
         self.ambiente = AmbienteRefugio(ANCHO, ALTO, fuego=self.fuego_pos)      # humo, luciérnagas, niebla y luz
         self.app.guardar_checkpoint(self.personaje)
         self.abriendo = False
@@ -467,20 +467,20 @@ class Campamento(Pantalla):
         self.mensaje_tiempo = 4.0
         self.particulas = Particulas()
         if getattr(self.fondo_pixel, "usa_imagen", False):
-            self.pos_mara = (315, 310)
-            self.pos_ivo = (740, 510)
-            self.pos_nela = (315, 525)
-            self.duende = (755, 325)
-            self.umbral_pos = (550, 205)
+            self.pos_mara = (355, 345)
+            self.pos_ivo = (705, 520)
+            self.pos_nela = (355, 535)
+            self.duende = (720, 345)
+            self.umbral_pos = (544, 210)
         else:
             self.pos_mara = (370, 443)
             self.pos_ivo = (735, 526)
             self.pos_nela = (302, 558)
             self.duende = (803, 363)
             self.umbral_pos = (550, 294)
-        self.armaduras = [{"x": 398, "y": 344, "estado": "quieta", "tiempo": 0.0,
+        self.armaduras = [{"x": 420, "y": 320, "estado": "quieta", "tiempo": 0.0,
                            "activada": False},
-                          {"x": 702, "y": 344, "estado": "quieta", "tiempo": 0.0,
+                          {"x": 665, "y": 320, "estado": "quieta", "tiempo": 0.0,
                            "activada": False}]
         azar = random.Random(17)
         self.arboles = []
@@ -505,19 +505,33 @@ class Campamento(Pantalla):
             velocidad=self.VELOCIDAD,
             limites=self.limites,
             bloqueos=self.bloqueos,
+            usar_mascara=True,
         )
+        self.controlador.posicion = self.personaje
+        self._tiempo_paso = 0.0
+        self._tiempo_polvo = 0.0
 
     def evento(self, e):
         """Teclas del campamento: Esc/Retroceso vuelven al menú, E/Enter/Espacio interactúan, L alterna la antorcha y las flechas/WASD se anotan para mover. Recibe: e. Devuelve: nada."""
-        if e.type == getattr(pygame, "WINDOWFOCUSLOST", -1):
+        if e.type in (
+            getattr(pygame, "WINDOWFOCUSLOST", -1),
+            getattr(pygame, "WINDOWHIDDEN", -1),
+            getattr(pygame, "WINDOWMINIMIZED", -1),
+        ):
             self.teclas.clear()          # SEC-02: evita teclas pegadas tras Alt+Tab
+            if hasattr(self, "controlador"):
+                self.controlador.limpiar_teclas()
             return
         if self.abriendo:
             self.teclas.clear()
+            if hasattr(self, "controlador"):
+                self.controlador.limpiar_teclas()
             return
         if e.type == pygame.KEYDOWN:
             if e.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
                 self.teclas.clear()
+                if hasattr(self, "controlador"):
+                    self.controlador.limpiar_teclas()
                 self.app.guardar_checkpoint(self.personaje)
                 self.app.ir_a(Menu(self.app))
                 return
@@ -525,6 +539,8 @@ class Campamento(Pantalla):
                 self._interactuar(e.key)
                 if self.abriendo:
                     self.teclas.clear()
+                    if hasattr(self, "controlador"):
+                        self.controlador.limpiar_teclas()
                 return
             elif e.key == pygame.K_l:
                 self.antorcha = not self.antorcha
@@ -534,6 +550,8 @@ class Campamento(Pantalla):
             self.teclas.add(e.key)
         elif e.type == pygame.KEYUP:
             self.teclas.discard(e.key)
+        if hasattr(self, "controlador"):
+            self.controlador.evento(e)
 
     def _interactuar(self, tecla=pygame.K_e):
         """Reacciona a E según el objeto más cercano: abre el Umbral, habla con los sobrevivientes, intercambia fragmentos con Tizón o describe el entorno. Recibe/devuelve: nada."""
@@ -597,20 +615,75 @@ class Campamento(Pantalla):
             if self.porton_anim >= 1.0:
                 self.app.ir_a(Niveles(self.app))
                 return
+        teclas_activas = self.teclas or (
+            self.controlador.teclas if hasattr(self, "controlador") else set()
+        )
         dx = dy = 0
         if not self.abriendo:
-            dx = (any(k in self.teclas for k in (pygame.K_RIGHT, pygame.K_d))
-                  - any(k in self.teclas for k in (pygame.K_LEFT, pygame.K_a)))
-            dy = (any(k in self.teclas for k in (pygame.K_DOWN, pygame.K_s))
-                  - any(k in self.teclas for k in (pygame.K_UP, pygame.K_w)))
-        nx, ny, self.direccion, self.andando = colisiones_campamento.resolver_movimiento_campamento(
-            self.personaje, dx, dy, dt, radio=9)
-        self.personaje[:] = (nx, ny)
+            dx = (any(k in teclas_activas for k in (pygame.K_RIGHT, pygame.K_d))
+                  - any(k in teclas_activas for k in (pygame.K_LEFT, pygame.K_a)))
+            dy = (any(k in teclas_activas for k in (pygame.K_DOWN, pygame.K_s))
+                  - any(k in teclas_activas for k in (pygame.K_UP, pygame.K_w)))
+        x_ant, y_ant = float(self.personaje[0]), float(self.personaje[1])
+        radio_hitbox = getattr(ControladorCampamento, "RADIO_HITBOX", 7.5)
+        try:
+            nx, ny, _, andando_resuelto = colisiones_campamento.resolver_movimiento_campamento(
+                self.personaje,
+                dx,
+                dy,
+                dt,
+                velocidad=float(self.VELOCIDAD),
+                radio=radio_hitbox,
+                permitir_corner_slip=True,
+            )
+        except TypeError:
+            nx, ny, _, andando_resuelto = colisiones_campamento.resolver_movimiento_campamento(
+                self.personaje,
+                dx,
+                dy,
+                dt,
+                velocidad=float(self.VELOCIDAD),
+                radio=radio_hitbox,
+            )
+        coordenadas = (float(nx), float(ny))
+        efectivo_x = coordenadas[0] - x_ant
+        efectivo_y = coordenadas[1] - y_ant
+        self.andando = bool(
+            not self.abriendo
+            and (dx != 0 or dy != 0)
+            and (andando_resuelto or abs(efectivo_x) > 1e-6 or abs(efectivo_y) > 1e-6)
+        )
+        if dx != 0 or dy != 0:
+            self.direccion = ControladorCampamento.calcular_direccion(
+                dx, dy, self.direccion, efectivo_x, efectivo_y
+            )
+        self.personaje[:] = coordenadas
         if hasattr(self, "controlador"):
-            self.controlador.posicion = list(self.personaje)
+            self.controlador.posicion = self.personaje
             self.controlador.direccion = self.direccion
             self.controlador.andando = self.andando
-        self.app.punto_guardado = tuple(self.personaje)
+        self.app.punto_guardado = coordenadas
+        if self.andando:
+            if not hasattr(self, "_tiempo_polvo"):
+                self._tiempo_polvo = 0.0
+            if not hasattr(self, "_tiempo_paso"):
+                self._tiempo_paso = 0.0
+            self._tiempo_polvo -= dt
+            if self._tiempo_polvo <= 0.0:
+                self._tiempo_polvo = 0.06
+                self.particulas.estela(
+                    coordenadas[0] + random.uniform(-4.0, 4.0),
+                    coordenadas[1] + 14.0 + random.uniform(-2.0, 2.0),
+                    (138, 128, 102),
+                    2,
+                )
+            self._tiempo_paso += dt
+            if self._tiempo_paso >= 0.26:
+                self._tiempo_paso %= 0.26
+                self.app.sonidos.reproducir("paso")
+        else:
+            self._tiempo_polvo = 0.0
+            self._tiempo_paso = 0.0
         for armadura in self.armaduras:
             distancia = math.hypot(self.personaje[0] - armadura["x"],
                                    self.personaje[1] - armadura["y"])
