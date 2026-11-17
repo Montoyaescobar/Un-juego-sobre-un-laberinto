@@ -4,6 +4,7 @@ Partículas (rastro, chispas, confeti) y sonidos generados por código (sin arch
 """
 
 import math
+import os
 import random
 from array import array
 
@@ -129,6 +130,69 @@ class Sonidos:
             self.activo = True
         except (pygame.error, NotImplementedError, OSError):
             self.activo = False
+        self._iniciar_voces()
+
+    VOCES = ("mara", "tizon", "nela", "ivo")
+
+    def _iniciar_voces(self):
+        """(Interno) Reserva un canal para voces y carga las pistas. Nunca lanza errores."""
+        self.voces = {}
+        self.canal_voz = None
+        if not self.activo:
+            return
+        try:
+            pygame.mixer.set_reserved(1)           # el canal 0 queda solo para voces
+            self.canal_voz = pygame.mixer.Channel(0)
+        except (pygame.error, NotImplementedError, OSError):
+            self.canal_voz = None
+            return
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        carpetas = (os.path.join(base, "sonidos", "voces"), base, os.path.dirname(base))
+        for nombre in self.VOCES:
+            for carpeta in carpetas:
+                for archivo in (nombre + ".mp3", "voz" + nombre + ".mp3"):
+                    ruta = os.path.join(carpeta, archivo)
+                    if nombre in self.voces or not os.path.isfile(ruta):
+                        continue
+                    try:
+                        self.voces[nombre] = pygame.mixer.Sound(ruta)
+                    except (pygame.error, FileNotFoundError, OSError):
+                        pass
+
+    def reproducir_voz(self, nombre_npc):
+        """
+        Reproduce la voz de un personaje sin interrumpir una voz en curso (anti-spam).
+
+        Recibe: nombre_npc ("mara", "tizon", "nela" o "ivo").
+        Devuelve: True si empezo a sonar; False si el canal esta ocupado o no hay voz/audio.
+        """
+        try:
+            if not self.activo or self.silenciado or self.canal_voz is None:
+                return False
+            if self.canal_voz.get_busy():
+                return False
+            voz = self.voces.get(str(nombre_npc).lower())
+            if voz is None:
+                return False
+            self.canal_voz.play(voz)
+            return True
+        except (pygame.error, AttributeError):
+            return False
+
+    def voz_ocupada(self):
+        """Devuelve True si hay una voz sonando. Recibe: nada."""
+        try:
+            return bool(self.canal_voz and self.canal_voz.get_busy())
+        except pygame.error:
+            return False
+
+    def detener_voz(self):
+        """Corta la voz actual. Recibe: nada. Devuelve: nada."""
+        try:
+            if self.canal_voz:
+                self.canal_voz.stop()
+        except pygame.error:
+            pass
 
     def _crear(self, notas, volumen, forma="seno"):
         """
