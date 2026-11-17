@@ -115,9 +115,12 @@ class TestInterfaz(unittest.TestCase):
         self.cuadros(5)
 
     def test_sonidos_creados(self):
-        # Esperado: con audio disponible se crean los 8 efectos
+        # Esperado: con audio disponible se crean los efectos requeridos
         self.assertTrue(self.app.sonidos.activo)
-        self.assertEqual(len(self.app.sonidos.efectos), 8)
+        self.assertGreaterEqual(len(self.app.sonidos.efectos), 8)
+        for nombre in ("paso", "pared", "deshacer", "pista", "clic", "ganar", "perder", "guardar",
+                       "hover", "conteo", "conteo_fin"):
+            self.assertIn(nombre, self.app.sonidos.efectos)
 
     def test_ajuste_de_brillo_cicla_se_guarda_y_dibuja(self):
         # Esperado: la fila BRILLO cambia entre 3 niveles, se guarda y el laberinto se dibuja
