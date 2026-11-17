@@ -116,6 +116,7 @@ class Sonidos:
         try:
             if not pygame.mixer.get_init():
                 pygame.mixer.init(frequency=self.RATE, size=-16, channels=1)
+            pygame.mixer.set_num_channels(24)   # polifonia suficiente para pasos seguidos
             self.efectos = {
                 "paso": self._crear([(190, 45)], 0.16),
                 "pared": self._crear([(95, 90)], 0.22, "cuadrada"),
@@ -126,6 +127,9 @@ class Sonidos:
                 "perder": self._crear([(330, 170), (262, 170), (196, 170), (131, 420)], 0.25,
                                       "cuadrada"),
                 "guardar": self._crear([(784, 80), (1046, 200)], 0.22),
+                "hover": self._crear_hover(),
+                "conteo": self._crear_conteo(),
+                "conteo_fin": self._crear_conteo_fin(),
             }
             self.activo = True
         except (pygame.error, NotImplementedError, OSError):
@@ -136,7 +140,8 @@ class Sonidos:
     # ------------------------------------------------------------------
     # Pasos organicos, musica de fondo y audio de persecucion
     # ------------------------------------------------------------------
-    CANAL_PERSECUCION = 6
+    CANAL_PERSECUCION = 1
+    DURACION_PASO = 0.24
     VOLUMEN_MUSICA = 0.55
     PISTAS = {
         "menu": ("musica_menu",),
@@ -164,7 +169,7 @@ class Sonidos:
         return None
 
     def _iniciar_audio_adaptativo(self):
-        """(Interno) Carga pasos y persecucion; reserva el canal 6. Nunca lanza errores."""
+        """(Interno) Carga pasos y persecucion; reserva el canal 1 (muestras de pasos recortadas). Nunca lanza errores."""
         self.sonidos_pasos = []
         self._ultimo_paso = -1
         self.canal_persecucion = None
@@ -177,11 +182,12 @@ class Sonidos:
             ruta = self._buscar_archivo(("paso%d" % i,), "sfx")
             if ruta:
                 try:
-                    self.sonidos_pasos.append(pygame.mixer.Sound(ruta))
+                    self.sonidos_pasos.append(self._recortar(pygame.mixer.Sound(ruta),
+                                                             self.DURACION_PASO))
                 except (pygame.error, FileNotFoundError, OSError):
                     pass
         try:
-            pygame.mixer.set_reserved(self.CANAL_PERSECUCION + 1)  # canales 0..6 reservados
+            pygame.mixer.set_reserved(2)  # solo 0 (voces) y 1 (persecucion)
             self.canal_persecucion = pygame.mixer.Channel(self.CANAL_PERSECUCION)
             ruta = self._buscar_archivo(self.PISTAS["persecucion"], "musica")
             if ruta:
@@ -287,7 +293,7 @@ class Sonidos:
         if not self.activo:
             return
         try:
-            pygame.mixer.set_reserved(1)           # el canal 0 queda solo para voces
+            pygame.mixer.set_reserved(2)           # canal 0 voces, canal 1 persecucion
             self.canal_voz = pygame.mixer.Channel(0)
         except (pygame.error, NotImplementedError, OSError):
             self.canal_voz = None
@@ -340,6 +346,71 @@ class Sonidos:
         except pygame.error:
             pass
 
+    def _recortar(self, sonido, segundos):
+        """
+        (Interno) Quita el silencio inicial y la cola muerta de una muestra.
+
+        Recibe: sonido (pygame Sound), segundos (duracion final).
+        Devuelve: un Sound nuevo de ~segundos con fade-out corto; el original si falla.
+        """
+        try:
+            frec, formato, canales = pygame.mixer.get_init()
+            if formato != -16:
+                return sonido
+            crudo = sonido.get_raw()
+            muestras = array("h")
+            muestras.frombytes(crudo[:len(crudo) - len(crudo) % 2])
+            marco = max(1, canales)
+            inicio = 0
+            for i in range(0, len(muestras), marco):
+                if abs(muestras[i]) > 400:
+                    inicio = max(0, i - 8 * marco)
+                    break
+            largo = int(frec * segundos) * marco
+            corte = muestras[inicio:inicio + largo]
+            n = len(corte)
+            fade = min(n, int(frec * 0.02) * marco)
+            for j in range(fade):
+                corte[n - 1 - j] = int(corte[n - 1 - j] * (j / fade))
+            return pygame.mixer.Sound(buffer=corte.tobytes())
+        except (pygame.error, ValueError, TypeError, OverflowError):
+            return sonido
+
+    def _sintetizar(self, funcion, ms, volumen):
+        """(Interno) Genera un Sound muestreando funcion(t_segundos) -> -1..1 durante ms."""
+        n = int(self.RATE * ms / 1000)
+        datos = array("h")
+        for i in range(n):
+            v = max(-1.0, min(1.0, funcion(i / self.RATE)))
+            datos.append(int(32767 * volumen * v))
+        return pygame.mixer.Sound(buffer=datos.tobytes())
+
+    def _crear_hover(self):
+        """(Interno) Clic suave de madera/interfaz de 25 ms."""
+        def f(t):
+            env = math.exp(-t * 160) * min(1.0, t / 0.001)
+            tono = math.sin(math.tau * 900 * t) * 0.6 + math.sin(math.tau * 1350 * t) * 0.25
+            return env * tono
+        return self._sintetizar(f, 25, 0.3)
+
+    def _crear_conteo(self):
+        """(Interno) Tick percusivo nitido de 16 ms."""
+        rng = random.Random(7)
+        def f(t):
+            env = math.exp(-t * 260) * min(1.0, t / 0.0005)
+            return env * (math.sin(math.tau * 1800 * t) * 0.7 + rng.uniform(-1, 1) * 0.3)
+        return self._sintetizar(f, 16, 0.3)
+
+    def _crear_conteo_fin(self):
+        """(Interno) Acorde brillante tipo campana dorada (Do mayor con octava)."""
+        parciales = ((1046.5, 1.0, 5.0), (1318.5, 0.8, 5.5), (1568.0, 0.8, 6.0),
+                     (2093.0, 0.6, 7.0), (3136.0, 0.25, 11.0))
+        def f(t):
+            env = min(1.0, t / 0.004)
+            s = sum(a * math.exp(-t * d) * math.sin(math.tau * fr * t) for fr, a, d in parciales)
+            return env * s / 2.6
+        return self._sintetizar(f, 900, 0.5)
+
     def _crear(self, notas, volumen, forma="seno"):
         """
         (Interno) Construye un sonido con una lista de notas.
@@ -368,7 +439,8 @@ class Sonidos:
         Suena un efecto.
 
         Recibe:
-            nombre: "paso", "pared", "deshacer", "pista", "clic", "ganar", "perder" o "guardar".
+            nombre: "paso", "pared", "deshacer", "pista", "clic", "ganar", "perder", "guardar",
+            "hover", "conteo" o "conteo_fin".
         Devuelve:
             Nada.
         """
