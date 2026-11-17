@@ -219,9 +219,12 @@ MOVIMIENTOS = {
 }
 COLOR_NIVEL = {nombre: acento_de(nombre) for nombre in ("Fácil", "Medio", "Difícil")}
 
-# Nombres del equipo para la pantalla de créditos. Escríbelos aquí, por ejemplo:
-#     INTEGRANTES = ["Ana", "Luis", "Marta"]
-INTEGRANTES = ["Jorge Mario Montoya", "Sebastian Paz Diaz", "Alejandro"]
+# Nombres del equipo para la pantalla de créditos:
+INTEGRANTES = [
+    "Jorge Mario Montoya Gómez",
+    "Duván Sebastián Paz",
+    "Alejandro Ramírez Carvajal",
+]
 
 
 class Pantalla:
@@ -552,7 +555,7 @@ class AjustesMenu(Pantalla):
 
 
 class Creditos(Pantalla):
-    """Pantalla breve de créditos con la escena animada del menú."""
+    """Pantalla de créditos destacando a los desarrolladores y la arquitectura del juego."""
 
     def __init__(self, app):
         """Crea la escena de fondo y el botón Volver. Recibe: app. Devuelve: nada (constructor)."""
@@ -560,12 +563,15 @@ class Creditos(Pantalla):
         self.escena = EscenaMenuPixel()
         self.volver = Boton("Volver", (ANCHO // 2 - 110, 590, 220, 48),
                             lambda: app.ir_a(Menu(app)), "Esc", ORO, 21)
+        if hasattr(self.app.sonidos, "reproducir_musica"):
+            self.app.sonidos.reproducir_musica("menu")
 
     def evento(self, e):
         """Esc, Enter o el botón Volver regresan al menú. Recibe: e (evento de Pygame). Devuelve: nada."""
         if self._clics(e, [self.volver]):
             return
         if e.type == pygame.KEYDOWN and e.key in (pygame.K_ESCAPE, pygame.K_RETURN):
+            self.app.sonidos.reproducir("clic")
             self.app.ir_a(Menu(self.app))
 
     def actualizar(self, dt):
@@ -574,22 +580,58 @@ class Creditos(Pantalla):
         self.volver.actualizar(dt, pygame.mouse.get_pos())
 
     def dibujar(self, surf):
-        """Dibuja la escena oscurecida, el panel y las líneas de créditos. Recibe: surf. Devuelve: nada."""
+        """Dibuja la escena oscurecida, el panel ornamentado y los integrantes destacados. Recibe: surf. Devuelve: nada."""
         self.escena.dibujar(surf, self.t)
         capa = pygame.Surface((ANCHO, ALTO), pygame.SRCALPHA)
         capa.fill((3, 6, 9, 180))
         surf.blit(capa, (0, 0))
-        panel(surf, pygame.Rect(300, 130, 500, 430), 238, (121, 98, 62), 3, (22, 23, 19))
-        texto(surf, "CRÉDITOS", 44, ORO, (ANCHO // 2, 164), "midtop", negrita=True)
-        lineas = ["LABERINTO · EL UMBRAL DE CENIZA", "Aventura retro dark fantasy", "",
-                  "Desarrollado en Python y Pygame", "Laberintos generados en cada expedición",
-                  "Pila · deshacer    /    Cola · búsqueda de rutas",
-                  "La luz es tuya. El camino, no."]
-        if INTEGRANTES:
-            lineas += ["", "Integrantes: " + "  ·  ".join(INTEGRANTES)]
-        for i, linea in enumerate(lineas):
-            texto(surf, linea, 18 if i else 20, TEXTO if i in (0, 6) else APAGADO,
-                  (ANCHO // 2, 240 + i * 37), "center", negrita=i in (0, 6), sombra=False)
+
+        cx = ANCHO // 2
+        rect = pygame.Rect(cx - 290, 70, 580, 500)
+        panel(surf, rect, 242, (135, 110, 68), 3, (20, 22, 18))
+        remaches(surf, rect, (100, 85, 55), 10)
+        brillo(surf, (cx, rect.y + 35), 230, ORO, 0.12 + 0.03 * math.sin(self.t * 2))
+
+        # Encabezado
+        texto(surf, "CRÉDITOS", 38, ORO, (cx, rect.y + 18), "midtop", negrita=True)
+        texto(surf, "LABERINTO  ·  EL UMBRAL DE CENIZA", 14, (214, 220, 196), (cx, rect.y + 60),
+              "midtop", negrita=True)
+        separador(surf, rect.x + 36, rect.right - 36, rect.y + 82, BORDE)
+
+        # Sección de Desarrolladores
+        texto(surf, "EQUIPO DE DESARROLLO", 15, ORO, (cx, rect.y + 94), "midtop", negrita=True)
+
+        badge_w = 460
+        badge_h = 46
+        bx = cx - badge_w // 2
+        for i, nombre in enumerate(INTEGRANTES):
+            by = rect.y + 124 + i * 54
+            brect = pygame.Rect(bx, by, badge_w, badge_h)
+            # Tarjeta individual con relieve y sombra suave
+            panel(surf, brect, 215, (115, 96, 62), 1, (27, 29, 23))
+            # Gema o insignia dorada
+            pygame.draw.circle(surf, ORO, (brect.x + 24, brect.centery), 5)
+            pygame.draw.circle(surf, (255, 235, 160), (brect.x + 24, brect.centery), 2)
+            # Nombre del integrante destacado con alta legibilidad
+            texto(surf, nombre, 19, (248, 242, 228), (brect.x + 44, brect.centery),
+                  "midleft", negrita=True)
+            # Etiqueta de rol
+            texto(surf, "Desarrollo", 13, CIAN, (brect.right - 22, brect.centery),
+                  "midright", sombra=False)
+
+        # Sección Técnica y Lore
+        separador(surf, rect.x + 36, rect.right - 36, rect.y + 298, BORDE)
+        texto(surf, "ARQUITECTURA Y ESTRUCTURAS DE DATOS", 13, ORO, (cx, rect.y + 312),
+              "midtop", negrita=True)
+        texto(surf, "Pila (Deshacer)  ·  Cola (Búsqueda BFS)  ·  Árbol Binario (BST)", 14,
+              (195, 205, 185), (cx, rect.y + 334), "midtop", sombra=False)
+        texto(surf, "Laberintos Procedurales  ·  Audio Adaptativo & Pixel Art", 13, APAGADO,
+              (cx, rect.y + 356), "midtop", sombra=False)
+        texto(surf, "Desarrollado en Python & Pygame", 13, (160, 180, 170), (cx, rect.y + 382),
+              "midtop", sombra=False)
+        texto(surf, "« La luz es tuya. El camino, no. »", 14, (190, 175, 130), (cx, rect.y + 448),
+              "midtop", sombra=False)
+
         self.volver.dibujar(surf)
 
 
