@@ -590,7 +590,10 @@ class Creditos(Pantalla):
 # =====================================================================================
 #  CAMPAMENTO / ZONA SEGURA
 # =====================================================================================
-RADIO_INTERACCION = 75      # SEC-08: radio común para NPCs, armaduras y Tizón
+RADIO_INTERACCION = 85      # SEC-08: radio normalizado para NPCs y lápidas
+RADIO_OBJETO = 78           # SEC-08: radio normalizado (75-80px) para objetos del campamento
+RADIO_ARMADURA = 75         # SEC-08: radio para armaduras decorativas
+RADIO_UMBRAL = 135          # SEC-08: radio para el portón del Umbral
 
 
 class Campamento(Pantalla):
@@ -709,37 +712,72 @@ class Campamento(Pantalla):
         if hasattr(self, "controlador"):
             self.controlador.evento(e)
 
+    def _candidatos_interaccion(self):
+        """Construye la lista de elementos interactivos con posición, radio, distancia y etiqueta HUD."""
+        x, y = self.personaje
+        definiciones = [
+            ("umbral", self.umbral_pos, RADIO_UMBRAL, "E  ·  ABRIR EL UMBRAL"),
+            ("mara", self.pos_mara, RADIO_INTERACCION, "E  ·  HABLAR CON MARA"),
+            ("ivo", self.pos_ivo, RADIO_INTERACCION, "E  ·  HABLAR CON IVO"),
+            ("nela", self.pos_nela, RADIO_INTERACCION, "E  ·  HABLAR CON NELA"),
+            ("tizon", self.duende, RADIO_INTERACCION, "E  ·  TRUEQUE CON TIZÓN"),
+            ("lapidas", (166, 290), RADIO_INTERACCION, "E  ·  EXAMINAR LÁPIDAS"),
+            ("hamaca", (266, 356), RADIO_OBJETO, "E  ·  EXAMINAR HAMACA"),
+            ("mapa", (894, 536), RADIO_OBJETO, "E  ·  EXAMINAR MAPA"),
+            ("hoguera", self.fuego_pos, RADIO_OBJETO, "E  ·  EXAMINAR HOGUERA"),
+            ("carro", (138, 599), RADIO_OBJETO, "E  ·  EXAMINAR CARRO"),
+        ]
+        for armadura in self.armaduras:
+            definiciones.append(
+                ("armadura", (armadura["x"], armadura["y"]), RADIO_ARMADURA, "E  ·  EXAMINAR ARMADURA")
+            )
+        candidatos = []
+        for clave, (px, py), radio, hud in definiciones:
+            candidatos.append({
+                "id": clave,
+                "pos": (px, py),
+                "radio": radio,
+                "distancia": math.hypot(x - px, y - py),
+                "hud": hud,
+            })
+        return candidatos
+
     def _interactuar(self, tecla=pygame.K_e):
         """Reacciona a E según el objeto más cercano: abre el Umbral, habla con los sobrevivientes, intercambia fragmentos con Tizón o describe el entorno. Recibe/devuelve: nada."""
-        x, y = self.personaje
-        if math.hypot(x - self.umbral_pos[0], y - self.umbral_pos[1]) < 135:
+        candidatos_en_rango = [
+            c for c in self._candidatos_interaccion() if c["distancia"] < c["radio"]
+        ]
+        if not candidatos_en_rango:
+            self.mensaje = "Acércate al Umbral, la hamaca o el mapa para interactuar."
+            self.mensaje_tiempo = 3.5
+            return
+
+        objetivo = min(candidatos_en_rango, key=lambda c: c["distancia"])
+        clave = objetivo["id"]
+        if clave == "umbral":
             self.app.sonidos.reproducir("clic")
             self.app.guardar_checkpoint(self.personaje)
             self.abriendo = True
             self.mensaje = "El Umbral se está abriendo..."
             self.mensaje_tiempo = 3.5     # SEC-06: mensaje legible
-        elif math.hypot(x - self.pos_mara[0], y - self.pos_mara[1]) < RADIO_INTERACCION:
+        elif clave == "mara":
             self.mensaje = "Mara: la marca de tiza señala dónde volver si una placa despierta."
             self.mensaje_tiempo = 4.5
-        elif math.hypot(x - self.pos_ivo[0], y - self.pos_ivo[1]) < RADIO_INTERACCION:
+            if hasattr(self.app.sonidos, "reproducir_voz"):
+                self.app.sonidos.reproducir_voz("mara")
+        elif clave == "ivo":
             self.mensaje = "Ivo: cuando la puerta rechina, algo se mueve al otro lado."
             self.mensaje_tiempo = 4.5
-        elif math.hypot(x - self.pos_nela[0], y - self.pos_nela[1]) < RADIO_INTERACCION:
+            if hasattr(self.app.sonidos, "reproducir_voz"):
+                self.app.sonidos.reproducir_voz("ivo")
+        elif clave == "nela":
             self.mensaje = "Nela: vuelve con vida. La hoguera no puede esperar para siempre."
             self.mensaje_tiempo = 4.5
-        elif math.hypot(x - 266, y - 356) < 120:
-            self.mensaje = "La hamaca está vacía. Alguien dejó su capa junto al fuego."
-            self.mensaje_tiempo = 4.5
-        elif math.hypot(x - 894, y - 536) < 130:
-            self.mensaje = "El mapa tiene rutas tachadas y una marca nueva bajo el bosque."
-            self.mensaje_tiempo = 4.5
-        elif math.hypot(x - self.fuego_pos[0], y - self.fuego_pos[1]) < 125:
-            self.mensaje = "La hoguera mantiene a raya la niebla, por ahora."
-            self.mensaje_tiempo = 4.5
-        elif math.hypot(x - 138, y - 599) < 110:
-            self.mensaje = "El carro llegó cargado de tablones. Nadie recuerda quién lo empujó."
-            self.mensaje_tiempo = 4.5
-        elif math.hypot(x - self.duende[0], y - self.duende[1]) < RADIO_INTERACCION:
+            if hasattr(self.app.sonidos, "reproducir_voz"):
+                self.app.sonidos.reproducir_voz("nela")
+        elif clave == "tizon":
+            if hasattr(self.app.sonidos, "reproducir_voz"):
+                self.app.sonidos.reproducir_voz("tizon")
             if tecla != pygame.K_e:          # SEC-09: el trueque exige E
                 self.mensaje = "Tizón: pulsa E para confirmar el trueque."
                 self.mensaje_tiempo = 3.5
@@ -753,15 +791,24 @@ class Campamento(Pantalla):
             else:
                 self.mensaje = "Tizón: trae un fragmento del laberinto. Te dará una pista gratis."
                 self.mensaje_tiempo = 5.0
-        elif math.hypot(x - 166, y - 290) < 140:
+        elif clave == "lapidas":
             self.mensaje = "Las lápidas son anteriores al campamento. Una tiene tierra fresca."
             self.mensaje_tiempo = 4.5
-        elif any(math.hypot(x - a["x"], y - a["y"]) < RADIO_INTERACCION for a in self.armaduras):
+        elif clave == "hamaca":
+            self.mensaje = "La hamaca está vacía. Alguien dejó su capa junto al fuego."
+            self.mensaje_tiempo = 4.5
+        elif clave == "mapa":
+            self.mensaje = "El mapa tiene rutas tachadas y una marca nueva bajo el bosque."
+            self.mensaje_tiempo = 4.5
+        elif clave == "hoguera":
+            self.mensaje = "La hoguera mantiene a raya la niebla, por ahora."
+            self.mensaje_tiempo = 4.5
+        elif clave == "carro":
+            self.mensaje = "El carro llegó cargado de tablones. Nadie recuerda quién lo empujó."
+            self.mensaje_tiempo = 4.5
+        elif clave == "armadura":
             self.mensaje = "La armadura no tiene a nadie dentro... pero acaba de moverse."
             self.mensaje_tiempo = 4.5
-        else:
-            self.mensaje = "Acércate al Umbral, la hamaca o el mapa para interactuar."
-            self.mensaje_tiempo = 3.5
 
     def actualizar(self, dt):
         """Mueve al personaje con colisiones, anima las armaduras, el mensaje y las chispas, y abre el portón cuando se interactúa. Recibe: dt (segundos). Devuelve: nada."""
@@ -1049,20 +1096,13 @@ class Campamento(Pantalla):
 
     def _objetivo_cercano(self):
         """Texto HUD del objetivo interactuable más cercano, o None. Recibe: nada. Devuelve: str o None."""
-        x, y = self.personaje
-        if math.hypot(x - self.umbral_pos[0], y - self.umbral_pos[1]) < 135:
-            return "E  ·  ABRIR EL UMBRAL"
-        candidatos = [("E  ·  HABLAR CON MARA", self.pos_mara),
-                      ("E  ·  HABLAR CON IVO", self.pos_ivo),
-                      ("E  ·  HABLAR CON NELA", self.pos_nela),
-                      ("E  ·  TRUEQUE CON TIZÓN", self.duende)]
-        candidatos += [("E  ·  EXAMINAR ARMADURA", (a["x"], a["y"])) for a in self.armaduras]
-        mejor = None
-        for texto_hud, (px, py) in candidatos:
-            d = math.hypot(x - px, y - py)
-            if d < RADIO_INTERACCION and (mejor is None or d < mejor[0]):
-                mejor = (d, texto_hud)
-        return mejor[1] if mejor else None
+        candidatos_en_rango = [
+            c for c in self._candidatos_interaccion() if c["distancia"] < c["radio"]
+        ]
+        if not candidatos_en_rango:
+            return None
+        mejor = min(candidatos_en_rango, key=lambda c: c["distancia"])
+        return mejor["hud"]
 
     def dibujar(self, surf):
         """Dibuja todo el campamento (fondo, objetos, personajes, pixelado) y encima el HUD con las indicaciones. Recibe: surf. Devuelve: nada."""
