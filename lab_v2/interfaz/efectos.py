@@ -131,6 +131,152 @@ class Sonidos:
         except (pygame.error, NotImplementedError, OSError):
             self.activo = False
         self._iniciar_voces()
+        self._iniciar_audio_adaptativo()
+
+    # ------------------------------------------------------------------
+    # Pasos organicos, musica de fondo y audio de persecucion
+    # ------------------------------------------------------------------
+    CANAL_PERSECUCION = 6
+    VOLUMEN_MUSICA = 0.55
+    PISTAS = {
+        "menu": ("musica_menu",),
+        "campamento": ("musica_campamento",),
+        "laberinto": ("musica_laberinto",),
+        "persecucion": ("musica_persecucion", "musica_persecusion"),
+        "victoria": ("musica_victoria",),
+        "derrota": ("musica_derrota",),
+    }
+
+    @staticmethod
+    def _carpetas_audio(sub):
+        """(Interno) Carpetas donde buscar audio: sonidos/<sub>, sonidos, raiz de lab_v2 y su padre."""
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return (os.path.join(base, "sonidos", sub), os.path.join(base, "sonidos"),
+                base, os.path.dirname(base))
+
+    def _buscar_archivo(self, nombres, sub):
+        """(Interno) Devuelve la ruta del primer archivo mp3 existente o None."""
+        for carpeta in self._carpetas_audio(sub):
+            for nombre in nombres:
+                ruta = os.path.join(carpeta, nombre + ".mp3")
+                if os.path.isfile(ruta):
+                    return ruta
+        return None
+
+    def _iniciar_audio_adaptativo(self):
+        """(Interno) Carga pasos y persecucion; reserva el canal 6. Nunca lanza errores."""
+        self.sonidos_pasos = []
+        self._ultimo_paso = -1
+        self.canal_persecucion = None
+        self.sonido_persecucion = None
+        self.volumen_persecucion = 0.0
+        self.pista_actual = None
+        if not self.activo:
+            return
+        for i in range(1, 5):
+            ruta = self._buscar_archivo(("paso%d" % i,), "sfx")
+            if ruta:
+                try:
+                    self.sonidos_pasos.append(pygame.mixer.Sound(ruta))
+                except (pygame.error, FileNotFoundError, OSError):
+                    pass
+        try:
+            pygame.mixer.set_reserved(self.CANAL_PERSECUCION + 1)  # canales 0..6 reservados
+            self.canal_persecucion = pygame.mixer.Channel(self.CANAL_PERSECUCION)
+            ruta = self._buscar_archivo(self.PISTAS["persecucion"], "musica")
+            if ruta:
+                self.sonido_persecucion = pygame.mixer.Sound(ruta)
+        except (pygame.error, NotImplementedError, OSError):
+            self.canal_persecucion = None
+            self.sonido_persecucion = None
+
+    def reproducir_paso(self):
+        """Suena un paso al azar entre los disponibles, nunca el mismo dos veces seguidas."""
+        try:
+            if not self.activo or self.silenciado:
+                return False
+            n = len(self.sonidos_pasos)
+            if n == 0:
+                return False
+            opciones = [i for i in range(n) if i != self._ultimo_paso]
+            idx = random.choice(opciones)
+            self._ultimo_paso = idx
+            self.sonidos_pasos[idx].play()
+            return True
+        except (pygame.error, AttributeError):
+            return False
+
+    def reproducir_musica(self, pista_id, bucle=True, fade_ms=1200):
+        """
+        Reproduce musica de fondo con fade-in (pygame.mixer.music).
+
+        Recibe: pista_id ("menu", "campamento", "laberinto", "persecucion", "victoria",
+            "derrota" o nombre de archivo), bucle, fade_ms.
+        Devuelve: True si empezo a sonar; False si no hay audio o pista.
+        """
+        try:
+            if not self.activo:
+                return False
+            clave = str(pista_id).lower()
+            if clave == "persecusion":
+                clave = "persecucion"
+            nombres = self.PISTAS.get(clave, (clave, "musica_" + clave))
+            ruta = self._buscar_archivo(nombres, "musica")
+            if ruta is None:
+                return False
+            if self.pista_actual == clave and pygame.mixer.music.get_busy():
+                return True
+            pygame.mixer.music.set_volume(0.0 if self.silenciado else self.VOLUMEN_MUSICA)
+            pygame.mixer.music.load(ruta)
+            pygame.mixer.music.play(-1 if bucle else 0, fade_ms=max(0, int(fade_ms)))
+            self.pista_actual = clave
+            return True
+        except (pygame.error, FileNotFoundError, OSError, AttributeError):
+            return False
+
+    def detener_musica(self, fade_ms=1000):
+        """Detiene la musica de fondo con fade-out. Nunca lanza errores."""
+        try:
+            self.pista_actual = None
+            if not self.activo:
+                return
+            if fade_ms and fade_ms > 0:
+                pygame.mixer.music.fadeout(int(fade_ms))
+            else:
+                pygame.mixer.music.stop()
+        except (pygame.error, AttributeError):
+            pass
+
+    def actualizar_persecucion(self, nivel_peligro, dt):
+        """
+        Modula el volumen de la persecucion con lerp continuo hacia el peligro.
+
+        Recibe: nivel_peligro (0 a 1), dt (segundos).
+        Devuelve: el volumen actual del canal (0 a 1).
+        """
+        try:
+            objetivo = max(0.0, min(1.0, float(nivel_peligro)))
+            if self.silenciado:
+                objetivo = 0.0
+            # Sube rapido, baja lento para desvanecer sin cortes bruscos.
+            velocidad = 4.0 if objetivo > self.volumen_persecucion else 1.5
+            k = 1.0 - math.exp(-velocidad * max(0.0, float(dt)))
+            self.volumen_persecucion += (objetivo - self.volumen_persecucion) * k
+            if self.volumen_persecucion < 0.005 and objetivo == 0.0:
+                self.volumen_persecucion = 0.0
+            canal, sonido = self.canal_persecucion, self.sonido_persecucion
+            if not self.activo or canal is None or sonido is None:
+                return self.volumen_persecucion
+            if self.volumen_persecucion > 0.0:
+                if not canal.get_busy():
+                    canal.set_volume(self.volumen_persecucion)
+                    canal.play(sonido, loops=-1)
+                canal.set_volume(self.volumen_persecucion)
+            elif canal.get_busy():
+                canal.stop()
+            return self.volumen_persecucion
+        except (pygame.error, AttributeError, TypeError, ValueError):
+            return getattr(self, "volumen_persecucion", 0.0)
 
     VOCES = ("mara", "tizon", "nela", "ivo")
 
@@ -226,6 +372,9 @@ class Sonidos:
         Devuelve:
             Nada.
         """
+        if nombre == "paso" and self.activo and self.sonidos_pasos:
+            self.reproducir_paso()
+            return
         if self.activo and not self.silenciado and nombre in self.efectos:
             self.efectos[nombre].play()
 
