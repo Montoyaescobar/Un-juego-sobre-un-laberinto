@@ -1,59 +1,49 @@
-# Plan de Orquestación Multi-Agente: Banda Sonora Completa, Pasos Orgánicos, Audio Dinámico de Persecución y Peligro Crítico Audiovisual
+# Plan de Orquestación Multi-Agente: Corrección de Pasos Consecutivos, Sonido Hover de Menú y Efectos del Contador de Puntaje Final
 
 **Proyecto:** *Laberinto: El Umbral de Ceniza* (`lab_v2`)  
-**Módulos Afectados:** Motor de Audio y Efectos (`interfaz/efectos.py`), Interfaz y Pantallas del Juego (`interfaz/pantallas.py`), Recursos de Audio (`lab_v2/sonidos/`), y Banco de Pruebas (`pruebas/test_audio_soundtrack.py`).  
-**Documento de Referencia:** Auditoría de Experiencia y Jugabilidad.
+**Módulos Afectados:** Motor de Sonidos y Efectos (`interfaz/efectos.py`), Interfaz y Pantallas (`interfaz/pantallas.py`), Recursos de Audio (`lab_v2/sonidos/sfx/`), y Banco de Pruebas (`pruebas/test_audio_polish.py`).  
+**Documento de Referencia:** Auditoría de Jugabilidad e Integración Acústica.
 
 ---
 
-## 1. Objetivos Fundamentales del Plan
+## 1. Diagnóstico Técnico y Objetivos Fundamentales
 
-1. **Integración Integral de la Banda Sonora (Soundtrack Completo):**
-   - Incorporar y organizar las pistas musicales generadas en el repositorio:
-     * `musica_menu.mp3`: Pantalla de inicio, selección de niveles y créditos.
-     * `musica_campamento.mp3`: Claro de Ceniza (hoguera, interacción con NPCs, descanso e inventario).
-     * `musica_laberinto.mp3`: Exploración subterránea en los niveles (dark ambient, sutil y envolvente).
-     * `musica_persecucion.mp3` (o `musica_persecusion.mp3`): Pánico y huida contrarreloj.
-     * `musica_victoria.mp3`: Triunfo amargo y solemne al cruzar el Umbral con estrellas y cofres.
-     * `musica_derrota.mp3`: Game Over y muerte en la niebla.
-   - Organizar las pistas en `lab_v2/sonidos/musica/` manteniendo tolerancia de búsqueda en la raíz para evitar errores de ruta.
+### 1.1. Diagnóstico de la Falla en los Pasos (Por qué se saltaban pisadas)
+* **Causa Raíz Identificada:**
+  1. Los 4 archivos `paso1.mp3`..`paso4.mp3` generados duran **2.06 segundos**, pero el sonido del impacto ocurre solo entre el segundo **0.08s y 0.29s**; los 1.77 segundos restantes son **silencio muerto**.
+  2. En `efectos.py`, se ejecutaba `set_reserved(7)` sobre un límite por defecto de **8 canales de Pygame**, dejando un único canal libre para efectos.
+  3. Al dar el primer paso, ese único canal quedaba ocupado reproduciendo los 2 segundos de silencio. Cuando el personaje daba el siguiente paso a los 0.26s, **no había canales libres**, provocando que `Sound.play()` fallara y se ignoraran ~7 de cada 8 pisadas consecutivas.
+* **Solución Técnica:**
+  1. Recortar los 4 archivos de pisadas a su duración real neta (~0.24 segundos) eliminando la cola de silencio.
+  2. Aumentar los canales del mezclador a `pygame.mixer.set_num_channels(24)` para permitir solapamiento acústico natural.
+  3. Garantizar que cada movimiento o cadencia de paso dispare de forma garantizada e ininterrumpida una pisada sin omisiones.
 
-2. **Efecto de Pasos Orgánicos Anti-Repetición (Footstep SFX):**
-   - Reemplazar el pitido sintético retro por las 4 tomas de pisadas reales (`paso1.mp3`, `paso2.mp3`, `paso3.mp3`, `paso4.mp3`).
-   - Implementar un algoritmo pseudo-aleatorio que evite la repetición inmediata del mismo sonido (*anti-machine gun effect*) al caminar tanto en el Campamento como en el Laberinto.
-
-3. **Música Adaptativa de Persecución con Atenuación Suave de Alejamiento (Fade-Out Continuo):**
-   - *Requisito Crítico:* La música de persecución **NO debe cortarse de golpe** al escapar de la Sombra o el enemigo.
-   - Se reproduce en un canal de audio independiente sobre la música del laberinto.
-   - Su volumen se modula mediante interpolación continua (*lerp*) según la distancia del jugador al peligro (`self.peligro`).
-   - Al alejarse de la sombra, el volumen desciende de forma suave y cinematográfica hasta apagarse sin sobresaltos, permitiendo que la persecución se active y desactive múltiples veces por partida con total naturalidad.
-
-4. **Efecto de Peligro Crítico en Pantalla (Visual y Temblor):**
-   - Cuando la Sombra o un enemigo en persecución BFS esté en rango crítico (`distancia <= 3` o `peligro > 0.45`):
-     * **Viñeta roja pulsante:** El borde de la pantalla se tiñe de carmesí con un pulso rítmico que simula un latido cardíaco acelerado.
-     * **Temblor de pantalla dinámico (`self.shake`):** La pantalla tiembla con intensidad directamente proporcional a la cercanía de la amenaza.
+### 1.2. Nuevos Efectos de Sonido Solicitados
+* **Capacidad de Creación:** **El sistema generará e implementará los efectos directamente por código** (mediante síntesis matemática procedural en `Sonidos` y/o generación de buffers WAV de alta fidelidad), sin necesidad de que el usuario tenga que crearlos externamente.
+* **Efectos a Implementar:**
+  1. **Sonido de Selección / Hover (`"hover"`):** Un toque sutil y elegante de madera/interfaz de 25 ms que suena cada vez que el cursor pasa sobre una opción del Menú Principal o cuando se navega con flechas/WASD.
+  2. **Sonido de Contador de Puntaje (`"conteo"`):** Un *tick* percusivo rápido y nítido de 15 ms que repica conforme el puntaje final sube de 0 a su valor total en la pantalla de victoria.
+  3. **Sonido de Finalización de Puntaje (`"conteo_fin"`):** Un acorde armónico brillante (campana / arpegio dorado) que suena en el momento exacto en que el contador alcanza su puntaje definitivo.
 
 ---
 
 ## 2. Topología de Agentes y Matriz de Propiedad Estricta (Zero-Conflict)
 
-Los archivos modificables están estrictamente particionados para garantizar desarrollo paralelo con cero conflictos de merge:
-
-$$\text{Archivos}(\text{Agent-Audio-Soundtrack}) \cap \text{Archivos}(\text{Agent-Gameplay-Audiovisual}) \cap \text{Archivos}(\text{Agent-QA-Soundtrack}) = \emptyset$$
+$$\text{Archivos}(\text{Agent-Audio-SFXCore}) \cap \text{Archivos}(\text{Agent-UI-AudioInteractions}) \cap \text{Archivos}(\text{Agent-QA-AudioPolish}) = \emptyset$$
 
 ```mermaid
 graph TD
-    subgraph "WAVE 1: Implementación Paralela (Audio Core + Gameplay/Visuales)"
-        A1["Agente 1: Agent-Audio-Soundtrack<br/>(Organización de MP3, Gestor de Música, Pasos Orgánicos y Fader de Persecución)"]
-        A2["Agente 2: Agent-Gameplay-Audiovisual<br/>(Conexión de Música por Pantalla, Temblor Dinámico y Viñeta Roja de Peligro)"]
+    subgraph "WAVE 1: Implementación Paralela (Audio Core + Interacción UI)"
+        A1["Agente 1: Agent-Audio-SFXCore<br/>(Recorte de Pasos, Canales 24, Síntesis de Hover, Conteo y Conteo_Fin)"]
+        A2["Agente 2: Agent-UI-AudioInteractions<br/>(Emisión Continua de Pasos, Hover en Menú y Ticking de Puntaje Final)"]
     end
 
     subgraph "Contratos de Interfaz Congelados (API Freeze)"
-        C1["lab_v2/interfaz/efectos.py<br/>Sonidos.reproducir_musica(pista_id, loop=True, fade_ms=1000)<br/>Sonidos.actualizar_persecucion(nivel_peligro, dt)<br/>Sonidos.reproducir_paso()<br/>Sonidos.detener_musica(fade_ms=1000)"]
+        C1["lab_v2/interfaz/efectos.py<br/>Sonidos.reproducir('hover')<br/>Sonidos.reproducir('conteo')<br/>Sonidos.reproducir('conteo_fin')<br/>Sonidos.reproducir_paso()<br/>pygame.mixer.set_num_channels(24)"]
     end
 
-    subgraph "WAVE 2: Verificación, Audio Adaptativo y Regresión"
-        A3["Agente 3: Agent-QA-Soundtrack<br/>(Tests Unitarios de Audio, Modulación de Volumen, Tests de Pasos y Suite 244+)"]
+    subgraph "WAVE 2: Verificación y No-Regresión"
+        A3["Agente 3: Agent-QA-AudioPolish<br/>(Pruebas de Pasos Rápidos, Hover en Menú, Conteo Final y Suite 251+)"]
     end
 
     A1 --> C1
@@ -66,52 +56,31 @@ graph TD
 
 | Agente | Identificador | Rol Especializado | Modelo Recomendado | Archivos de Escritura Exclusiva | Archivos de Solo Lectura |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Agente 1** | `Agent-Audio-Soundtrack` | Arquitecto de Audio y Música Adaptativa. | `Claude Sonnet 5.5 (Medium)` | • `lab_v2/interfaz/efectos.py`<br>• `lab_v2/sonidos/` *(organización de carpetas y archivos)* | • `lab_v2/interfaz/pantallas.py`<br>• `lab_v2/interfaz/app.py` |
-| **Agente 2** | `Agent-Gameplay-Audiovisual` | Ingeniero de Pantallas, Efectos de Peligro y Jugabilidad. | `Claude Sonnet 5.5 (Medium)` / `Gemini 4 Argon` | • `lab_v2/interfaz/pantallas.py` | • `lab_v2/interfaz/efectos.py`<br>• `lab_v2/sonidos/*` |
-| **Agente 3** | `Agent-QA-Soundtrack` | Especialista en Pruebas de Integración y Regresión. | `Claude Sonnet 5.5 (Medium)` | • `lab_v2/pruebas/test_audio_soundtrack.py` *(nuevo)* | • Todos los módulos de `lab_v2/*` |
+| **Agente 1** | `Agent-Audio-SFXCore` | Ingeniero de Audio, Procesamiento de Muestras y Síntesis. | `Claude Sonnet 5.5 (Medium)` | • `lab_v2/interfaz/efectos.py`<br>• `lab_v2/sonidos/sfx/` *(recorte de archivos)* | • `lab_v2/interfaz/pantallas.py`<br>• `lab_v2/interfaz/app.py` |
+| **Agente 2** | `Agent-UI-AudioInteractions` | Ingeniero de UI, Pantallas y Disparo de Eventos. | `Claude Sonnet 5.5 (Medium)` / `Gemini 4 Argon` | • `lab_v2/interfaz/pantallas.py` | • `lab_v2/interfaz/efectos.py`<br>• `lab_v2/sonidos/*` |
+| **Agente 3** | `Agent-QA-AudioPolish` | Ingeniero de Calidad y Pruebas de Estrés Acústico. | `Claude Sonnet 5.5 (Medium)` | • `lab_v2/pruebas/test_audio_polish.py` *(nuevo)* | • Todos los módulos de `lab_v2/*` |
 
 ---
 
 ## 3. Contratos de Interfaz Compartidos (API Freeze)
 
-### 3.1. Extensión de `Sonidos` (`lab_v2/interfaz/efectos.py`)
+### 3.1. Nuevos Sonidos y Configuración de Canales (`lab_v2/interfaz/efectos.py`)
 
 ```python
 class Sonidos:
-    # Mapeo de pistas de música tolerante a nombres y rutas
-    PISTAS_MUSICA = {
-        "menu": ["lab_v2/sonidos/musica/musica_menu.mp3", "musica_menu.mp3"],
-        "campamento": ["lab_v2/sonidos/musica/musica_campamento.mp3", "musica_campamento.mp3"],
-        "laberinto": ["lab_v2/sonidos/musica/musica_laberinto.mp3", "musica_laberinto.mp3"],
-        "persecucion": ["lab_v2/sonidos/musica/musica_persecucion.mp3", "musica_persecusion.mp3", "musica_persecucion.mp3"],
-        "victoria": ["lab_v2/sonidos/musica/musica_victoria.mp3", "musica_victoria.mp3"],
-        "derrota": ["lab_v2/sonidos/musica/musica_derrota.mp3", "musica_derrota.mp3"],
-    }
+    # Efectos sintetizados / cargados adicionales:
+    # "hover": Clic suave de interfaz para pasar el cursor sobre botones/opciones.
+    # "conteo": Tick percusivo de 15ms emitido en cada salto del contador numérico.
+    # "conteo_fin": Arpegio / acorde brillante de resolución cuando el puntaje final concluye.
 
-    def reproducir_musica(self, pista_id: str, bucle: bool = True, fade_ms: int = 1200) -> bool:
-        """Reproduce la pista musical principal con fundido suave (fade-in)."""
+    def __init__(self):
+        # Configuración de canales expandida:
+        pygame.mixer.set_num_channels(24)      # Canales suficientes para pasos solapados y SFX
+        pygame.mixer.set_reserved(2)           # Canal 0 para voces, Canal 1 para persecución
         ...
 
-    def detener_musica(self, fade_ms: int = 1000) -> None:
-        """Desvanece la música principal suavemente."""
-        ...
-
-    def actualizar_persecucion(self, nivel_peligro: float, dt: float) -> None:
-        """
-        Modula el volumen del canal de persecución según el nivel_peligro (0.0 a 1.0).
-        
-        REQUISITO DE ATENUACIÓN SUAVE (EFECTO DE ALEJAMIENTO):
-        - Interpolación continua: volumen_actual += (volumen_objetivo - volumen_actual) * dt * 2.5
-        - Si nivel_peligro <= 0.05, el volumen decae hasta 0.0 y se pausa/detiene sin cortes bruscos.
-        - Si nivel_peligro > 0.15, se reproduce/reanuda en bucle suave en su canal dedicado.
-        """
-        ...
-
-    def reproducir_paso(self) -> None:
-        """
-        Reproduce una pisada eligiendo pseudo-aleatoriamente entre paso1..paso4,
-        garantizando que nunca se repita la misma pisada dos veces seguidas.
-        """
+    def reproducir(self, nombre: str) -> None:
+        """Admite 'hover', 'conteo', 'conteo_fin', 'paso', 'clic', 'pared', etc."""
         ...
 ```
 
@@ -121,76 +90,66 @@ class Sonidos:
 
 ```text
 ├── WAVE 1 (Paralelo):
-│   ├── [T-01] [Agent-Audio-Soundtrack] Gestor de Bandas Sonoras, Pasos Orgánicos y Fader de Persecución (efectos.py)
-│   └── [T-02] [Agent-Gameplay-Audiovisual] Integración de Audio en Pantallas, Temblor y Viñeta Crítica (pantallas.py)
+│   ├── [T-01] [Agent-Audio-SFXCore] Recorte de Pasos, Expansión de Canales y Creación de Efectos (efectos.py, sfx/)
+│   └── [T-02] [Agent-UI-AudioInteractions] Sincronización Consecutiva de Pasos, Hover de Menú y Conteo Final (pantallas.py)
 └── WAVE 2 (Verificación):
-    └── [T-03] [Agent-QA-Soundtrack] Banco de Pruebas de Audio Adaptativo, No-Repetición y Regresión (test_audio_soundtrack.py)
+    └── [T-03] [Agent-QA-AudioPolish] Banco de Pruebas de Audio Polish y Regresión General (test_audio_polish.py)
 ```
 
 ---
 
-### WAVE 1: Implementación Paralela (Audio Core + Gameplay/Visuales)
+### WAVE 1: Implementación Paralela (Audio Core + Interacción UI)
 
-#### `[T-01]` Gestor de Bandas Sonoras, Pasos Orgánicos y Fader de Persecución
-* **Agente Asignado:** `Agent-Audio-Soundtrack`
+#### `[T-01]` Recorte de Pasos, Expansión de Canales y Creación de Efectos
+* **Agente Asignado:** `Agent-Audio-SFXCore`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)`
-* **Archivos de Escritura Exclusiva:** `lab_v2/interfaz/efectos.py`, `lab_v2/sonidos/`
+* **Archivos de Escritura Exclusiva:** `lab_v2/interfaz/efectos.py`, `lab_v2/sonidos/sfx/`
 * **Instrucciones Técnicas:**
-  1. **Organización de Recursos:**
-     - Crear los directorios `lab_v2/sonidos/musica/` y `lab_v2/sonidos/sfx/`.
-     - Mover o copiar las pistas musicales correspondientes: `musica_menu.mp3`, `musica_campamento.mp3`, `musica_laberinto.mp3`, `musica_persecucion.mp3` (copiando también `musica_persecusion.mp3`), `musica_victoria.mp3`, `musica_derrota.mp3`.
-     - Mover o copiar los pasos: `paso1.mp3`, `paso2.mp3`, `paso3.mp3`, `paso4.mp3`.
-  2. **Pasos Orgánicos en `Sonidos`:**
-     - Cargar los 4 sonidos de pasos en `self.sonidos_pasos = []`.
-     - Implementar `reproducir_paso()` con lógica anti-repetición (`self._ultimo_paso`).
-     - Reemplazar la llamada a `"paso"` en `reproducir("paso")` para delegar en `reproducir_paso()`.
-  3. **Sistema de Música y Fader Dinámico de Persecución:**
-     - Implementar `reproducir_musica(pista_id, bucle=True, fade_ms=1200)` usando `pygame.mixer.music`.
-     - Reservar un canal de audio dedicado para la persecución (`self.canal_persecucion = pygame.mixer.Channel(6)`).
-     - Cargar `musica_persecucion.mp3` como `pygame.mixer.Sound` para ese canal.
-     - Implementar `actualizar_persecucion(nivel_peligro, dt)`:
-       * Calcular el `volumen_objetivo = min(1.0, max(0.0, (nivel_peligro - 0.15) / 0.85))`.
-       * Interpolar suavemente el volumen actual hacia el objetivo con una constante de tiempo proporcional a `dt * 2.2`.
-       * Si el volumen desciende de 0.01, silenciar completamente el canal sin detener bruscamente la posición para reanudar limpio si la sombra vuelve a acercarse.
+  1. **Recorte y optimización de pisadas:**
+     - Analizar los archivos de pisadas existentes (`paso1.mp3`..`paso4.mp3`), eliminando el silencio de 1.7s final y guardándolos con duración neta (~0.24s) o cargando solo la ventana útil de muestras en memoria.
+  2. **Expansión de canales:**
+     - Establecer `pygame.mixer.set_num_channels(24)`.
+     - Reservar únicamente los canales 0 (voces) y 1 (persecución), dejando más de 20 canales libres para que los pasos y efectos nunca se ahoguen entre sí.
+  3. **Síntesis / Creación de nuevos efectos:**
+     - `"hover"`: Sintetizar un clic de madera/interfaz suave de 25ms (`notas=[(920, 18), (1200, 10)]`, volumen sutil `0.10`).
+     - `"conteo"`: Sintetizar un tick de alta definición de 16ms (`notas=[(740, 16)]`, volumen `0.15`).
+     - `"conteo_fin"`: Sintetizar un acorde ascendente brillante de resolución dorada (`notas=[(523, 80), (659, 90), (784, 110), (1046, 260)]`, volumen `0.30`).
+  4. Integrar los tres efectos en `self.efectos` de forma que respondan a `self.reproducir("hover")`, `self.reproducir("conteo")` y `self.reproducir("conteo_fin")`.
 
-#### `[T-02]` Integración de Audio en Pantallas, Temblor y Viñeta Crítica
-* **Agente Asignado:** `Agent-Gameplay-Audiovisual`
+#### `[T-02]` Sincronización Consecutiva de Pasos, Hover de Menú y Conteo Final
+* **Agente Asignado:** `Agent-UI-AudioInteractions`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)` / `Gemini 4 Argon`
 * **Archivos de Escritura Exclusiva:** `lab_v2/interfaz/pantallas.py`
 * **Instrucciones Técnicas:**
-  1. **Vinculación de Música por Pantalla:**
-     - En `Menu.__init__` y `Niveles`: activar `self.app.sonidos.reproducir_musica("menu")`.
-     - En `Campamento.__init__`: activar `self.app.sonidos.reproducir_musica("campamento")`.
-     - En `Juego.__init__`: activar `self.app.sonidos.reproducir_musica("laberinto")`.
-     - Al ganar la partida (`self.partida.estado == GANO`): reproducir `musica_victoria`.
-     - Al perder la partida (`self.partida.estado in (SIN_MOVIMIENTOS, ATRAPADO)`): reproducir `musica_derrota`.
-  2. **Efecto de Alejamiento y Audio Dinámico de Persecución:**
-     - En `Juego.actualizar(dt)`:
-       * Llamar en cada cuadro a `self.app.sonidos.actualizar_persecucion(self.peligro, dt)`.
-  3. **Peligro Crítico Audiovisual (Temblor y Viñeta):**
-     - En `Juego.actualizar(dt)`:
-       * Si `self.peligro > 0.45` o `cerca_persecucion <= 3`:
-         * Inyectar temblor de pantalla continuo:
-           `temblor_peligro = (self.peligro - 0.4) * 5.5 * (0.6 + 0.4 * math.sin(self.t * 18))`
-           `self.shake = max(self.shake, temblor_peligro)`
-     - En `Juego.dibujar(surf)`:
-       * Reforzar la viñeta roja pulsante cuando `self.peligro > 0.10`, añadiendo un borde de viñeta carmesí profundo más marcado cuando el peligro supera 0.60.
+  1. **Sonido continuo y consecutivo de pasos:**
+     - En `Campamento.actualizar()`: asegurar que `self._tiempo_paso` active el paso en cada ciclo de zancada sin trabas.
+     - En `Juego._mover()`: asegurar que cada movimiento exitoso a una casilla adyacente emita inmediatamente `self.app.sonidos.reproducir("paso")`.
+  2. **Sonido de hover en el Menú Principal:**
+     - En `Menu.actualizar(dt)`: cuando el cursor del mouse cambia la opción seleccionada (`self.sel != i`), reproducir `self.app.sonidos.reproducir("hover")`.
+     - En `Menu.evento(e)`: cuando se navega con `K_UP`, `K_DOWN`, `K_w`, `K_s`, reproducir también `self.app.sonidos.reproducir("hover")`.
+  3. **Contador de puntaje final animado y conclusión sonora:**
+     - En `Juego`: añadir atributos de control `_ultimo_puntaje_mostrado` y `_conteo_fin_reproducido`.
+     - En `Juego._dibujar_final()`:
+       * Conforme `mostrado = int(p.puntaje() * self._ease(min(1.0, self.t_fin / 1.2)))` incrementa (`mostrado > self._ultimo_puntaje_mostrado` y `mostrado < puntaje_total`), llamar a `self.app.sonidos.reproducir("conteo")`.
+       * Cuando el contador llega al puntaje final (`min(1.0, self.t_fin / 1.2) >= 1.0` y no ha sonado antes), llamar a `self.app.sonidos.reproducir("conteo_fin")`.
 
 ---
 
-### WAVE 2: Verificación, Audio Adaptativo y Regresión
+### WAVE 2: Verificación y No-Regresión
 
-#### `[T-03]` Banco de Pruebas de Audio Adaptativo, No-Repetición y Regresión
-* **Agente Asignado:** `Agent-QA-Soundtrack`
+#### `[T-03]` Banco de Pruebas de Audio Polish y Regresión General
+* **Agente Asignado:** `Agent-QA-AudioPolish`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)`
-* **Archivos de Escritura Exclusiva:** `lab_v2/pruebas/test_audio_soundtrack.py`
+* **Archivos de Escritura Exclusiva:** `lab_v2/pruebas/test_audio_polish.py`
 * **Instrucciones Técnicas:**
-  1. Crear `lab_v2/pruebas/test_audio_soundtrack.py`:
-     - `test_carga_pistas_musica`: Validar que todas las pistas (`menu`, `campamento`, `laberinto`, `persecucion`, `victoria`, `derrota`) se localizan correctamente.
-     - `test_antirepeticion_pasos`: Simular 50 pasos consecutivos y verificar que nunca hay dos pasos con el mismo índice seguidos (`paso_i != paso_{i+1}`).
-     - `test_fader_persecucion_atenuacion_suave`: Verificar que ante una caída brusca de peligro de 1.0 a 0.0, el volumen no cae a 0 instantáneamente sino que desciende gradualmente por *lerp*.
-     - `test_musica_pantallas_transicion`: Validar que las pantallas solicitan la pista musical correcta.
-  2. Ejecutar la suite completa (`$env:PYTHONPATH="lab_v2"; python -m unittest discover -s lab_v2/pruebas`) asegurando que los 244 tests previos más los nuevos pasen con 0 errores y 0 fallos.
+  1. Crear `lab_v2/pruebas/test_audio_polish.py`:
+     - `test_pasos_rapidos_consecutivos`: Simular 10 pasos en ráfaga rápida (a intervalos de 0.1s) y verificar que todos se reproducen sin rechazos de canal.
+     - `test_sonido_hover_menu`: Simular movimiento de mouse y teclas de flecha en `Menu` y verificar la emisión de `"hover"`.
+     - `test_conteo_puntaje_y_finalizacion`: Simular la pantalla final durante el ascenso de `t_fin` y validar que `"conteo"` repica y `"conteo_fin"` se dispara una única vez al terminar.
+     - `test_existencia_nuevos_efectos`: Verificar que `"hover"`, `"conteo"` y `"conteo_fin"` están disponibles en `Sonidos`.
+  2. Ejecutar la suite completa:
+     `$env:PYTHONPATH="lab_v2"; python -m unittest discover -s lab_v2/pruebas`
+     Asegurar 251+ pruebas pasando con 0 errores y 0 fallos.
 
 ---
 
@@ -199,40 +158,40 @@ class Sonidos:
 ### Resumen de Recursos Necesarios
 * **Total de Agentes:** 3 agentes en 2 oleadas (Wave 1: 2 agentes paralelos; Wave 2: 1 agente de control de calidad).
 * **Modelos Aptos:**
-  - `Claude Sonnet 5.5 (Medium)` para la lógica de canales de audio, modulación de volumen, anti-repetición y tests.
-  - `Claude Sonnet 5.5 (Medium)` o `Gemini 4 Argon` para pantallas de juego, viñetas y temblor de cámara.
+  - `Claude Sonnet 5.5 (Medium)` para ingeniería de audio, procesamiento de muestras y suite de tests.
+  - `Claude Sonnet 5.5 (Medium)` o `Gemini 4 Argon` para pantallas de menú y finalización.
 
 ---
 
-### 📋 PROMPT LISTO PARA AGENTE 1 (`Agent-Audio-Soundtrack`)
+### 📋 PROMPT LISTO PARA AGENTE 1 (`Agent-Audio-SFXCore`)
 ```text
-Rol: Agent-Audio-Soundtrack (Arquitecto de Audio y Música Adaptativa)
+Rol: Agent-Audio-SFXCore (Ingeniero de Audio, Procesamiento de Muestras y Síntesis)
 Modelo Recomendado: Claude Sonnet 5.5 (Medium)
 Archivos de Escritura Exclusiva:
 - lab_v2/interfaz/efectos.py
-- lab_v2/sonidos/ (organizar carpetas y recursos)
+- lab_v2/sonidos/sfx/
 Archivos de Solo Lectura:
 - lab_v2/interfaz/pantallas.py
 - lab_v2/interfaz/app.py
 
-Tu misión es implementar el gestor de música de fondo, pasos orgánicos y fader de persecución en lab_v2:
-1. En la raíz existen: musica_menu.mp3, musica_campamento.mp3, musica_laberinto.mp3, musica_persecusion.mp3, musica_victoria.mp3, musica_derrota.mp3, y paso1.mp3..paso4.mp3.
-   Crea lab_v2/sonidos/musica/ y lab_v2/sonidos/sfx/ y copia/organiza estos archivos (asegura compatibilidad para encontrar musica_persecucion o musica_persecusion indistintamente).
-2. En lab_v2/interfaz/efectos.py extiende la clase Sonidos:
-   - Carga los 4 pasos en self.sonidos_pasos. Implementa reproducir_paso(): debe seleccionar aleatoriamente entre los 4 sin repetir nunca el mismo paso dos veces seguidas. Haz que self.reproducir("paso") invoque este método.
-   - Implementa reproducir_musica(pista_id, bucle=True, fade_ms=1200) y detener_musica(fade_ms=1000) usando pygame.mixer.music de forma robusta y con manejo de excepciones (modo sin audio).
-   - Implementa el audio de persecución adaptativo:
-     * Reserva un canal para persecución (ej. self.canal_persecucion = pygame.mixer.Channel(6)).
-     * Carga la pista de persecución como Sound.
-     * Implementa actualizar_persecucion(nivel_peligro, dt): modula el volumen del canal usando interpolación continua (lerp) hacia el objetivo. Al alejarse de la sombra/enemigo (peligro cayendo), el volumen debe desvanecerse suavemente hasta 0 sin cortes bruscos.
+Tu misión es resolver el problema de los pasos que se saltan y crear los nuevos efectos de hover y conteo de puntaje:
+1. Problema de pasos que no suenan seguidos:
+   - Los archivos paso1..paso4 tienen 1.7s de silencio al final y Pygame solo tenía 8 canales con 7 reservados.
+   - En lab_v2/interfaz/efectos.py, configura pygame.mixer.set_num_channels(24) y reserva solo 2 canales (0 para voces, 1 para persecución).
+   - Recorta las muestras de los pasos para que duren exactamente ~0.24s (eliminando el silencio muerto) o genera buffers limpios sin cola de silencio para que cada pisada suene de inmediato sin bloquear las siguientes.
+2. Síntesis y creación de nuevos efectos (puedes crearlos tú mismo en código mediante _crear()):
+   - "hover": Clic suave de madera/interfaz de 25ms para pasar el cursor sobre opciones del menú.
+   - "conteo": Tick percusivo nítido de 16ms para cada incremento del contador numérico de puntaje.
+   - "conteo_fin": Acorde armónico brillante / campana dorada de resolución cuando el puntaje llega al final.
+   - Regístralos en self.efectos para que respondan a reproducir("hover"), reproducir("conteo") y reproducir("conteo_fin").
 3. Respeta tu titularidad de archivos exclusiva y notifica el freeze de la API al terminar.
 ```
 
 ---
 
-### 📋 PROMPT LISTO PARA AGENTE 2 (`Agent-Gameplay-Audiovisual`)
+### 📋 PROMPT LISTO PARA AGENTE 2 (`Agent-UI-AudioInteractions`)
 ```text
-Rol: Agent-Gameplay-Audiovisual (Ingeniero de Pantallas, Efectos de Peligro y Jugabilidad)
+Rol: Agent-UI-AudioInteractions (Ingeniero de UI, Pantallas y Disparo de Eventos)
 Modelo Recomendado: Claude Sonnet 5.5 (Medium) / Gemini 4 Argon
 Archivos de Escritura Exclusiva:
 - lab_v2/interfaz/pantallas.py
@@ -240,41 +199,39 @@ Archivos de Solo Lectura:
 - lab_v2/interfaz/efectos.py
 - lab_v2/sonidos/*
 
-Tu misión es conectar la música en cada pantalla del juego e implementar el temblor y viñeta roja de peligro crítico:
-1. Conexión de Música por Pantalla:
-   - En Menu y Niveles: llamar a self.app.sonidos.reproducir_musica("menu") si no está sonando ya.
-   - En Campamento: reproducir_musica("campamento").
-   - En Juego: reproducir_musica("laberinto").
-   - Al finalizar partida: reproducir_musica("victoria") si ganó, o reproducir_musica("derrota") si perdió/atrapado.
-2. Audio Dinámico de Persecución (Efecto de Alejamiento):
-   - En Juego.actualizar(dt): invocar self.app.sonidos.actualizar_persecucion(self.peligro, dt) en cada cuadro para que el volumen responda a la distancia con la sombra/enemigo.
-3. Peligro Crítico en Pantalla (Temblor y Viñeta Roja):
-   - Cuando self.peligro > 0.45 o cerca_persecucion <= 3:
-     * Inyectar temblor continuo en self.shake: self.shake = max(self.shake, (self.peligro - 0.4) * 6.0 * (0.6 + 0.4 * math.sin(self.t * 18))).
-   - En Juego.dibujar(surf): asegurar que la viñeta roja pulse intensamente al ritmo de tensión cuando el peligro sea elevado.
-4. Pasos en movimiento:
-   - Asegúrate de que las pisadas tanto en Campamento como en Juego usen self.app.sonidos.reproducir("paso") (que ahora dispara pasos orgánicos anti-repetición).
-5. Respeta tu titularidad de archivos exclusiva (solo lab_v2/interfaz/pantallas.py).
+Tu misión es conectar los pasos consecutivos sin omisiones, el sonido hover de menú y el contador de puntaje final:
+1. Pasos consecutivos garantizados:
+   - En Campamento.actualizar(): asegúrate de que cada ciclo de zancada al moverse invoque self.app.sonidos.reproducir("paso") sin retrasos ni bloqueos.
+   - En Juego._mover(): asegúrate de que cada paso exitoso en la cuadrícula dispare inmediatamente self.app.sonidos.reproducir("paso").
+2. Sonido Hover en el Menú Principal:
+   - En Menu.actualizar(dt): cuando el mouse cambie la opción seleccionada (self.sel != i), llama a self.app.sonidos.reproducir("hover").
+   - En Menu.evento(e): cuando se navegue con flechas o WASD (K_UP, K_DOWN, etc.), reproduce también self.app.sonidos.reproducir("hover").
+3. Sonido del Contador de Puntaje Final:
+   - En Juego, añade control para detectar el incremento del puntaje (_ultimo_puntaje_mostrado y _conteo_fin_sonado).
+   - En Juego._dibujar_final(surf):
+     * Conforme mostrado sube hacia el puntaje total, llama a self.app.sonidos.reproducir("conteo") cada vez que el valor aumente.
+     * En el instante en que el puntaje llega al 100% (min(1.0, self.t_fin / 1.2) >= 1.0) y no haya sonado antes, llama a self.app.sonidos.reproducir("conteo_fin").
+4. Respeta tu titularidad exclusiva (solo lab_v2/interfaz/pantallas.py).
 ```
 
 ---
 
-### 📋 PROMPT LISTO PARA AGENTE 3 (`Agent-QA-Soundtrack`)
+### 📋 PROMPT LISTO PARA AGENTE 3 (`Agent-QA-AudioPolish`)
 ```text
-Rol: Agent-QA-Soundtrack (Especialista en Pruebas de Integración y Regresión)
+Rol: Agent-QA-AudioPolish (Ingeniero de Calidad y Pruebas de Estrés Acústico)
 Modelo Recomendado: Claude Sonnet 5.5 (Medium)
 Archivos de Escritura Exclusiva:
-- lab_v2/pruebas/test_audio_soundtrack.py
+- lab_v2/pruebas/test_audio_polish.py
 Archivos de Solo Lectura:
 - Todos los módulos de lab_v2/*
 
-Tu misión es validar formalmente la banda sonora, los pasos orgánicos y el peligro crítico:
-1. Crea lab_v2/pruebas/test_audio_soundtrack.py con pruebas unitarias y de integración:
-   - test_localizacion_archivos_audio: Verifica que las 6 pistas musicales y los 4 pasos existen y son detectados.
-   - test_antirepeticion_pasos: Simula 40 llamadas seguidas a reproducir_paso() y valida que dos pasos idénticos nunca se ejecuten consecutivamente.
-   - test_fader_persecucion_atenuacion_suave: Valida que actualizar_persecucion modula el volumen por interpolación y que ante peligro=0.0 el volumen se reduce suavemente sin cortes.
-   - test_invocacion_musica_pantallas: Valida que las pantallas solicitan las pistas correctas (menu, campamento, laberinto, victoria, derrota).
-2. Ejecuta la suite de pruebas completa:
+Tu misión es verificar el arreglo de los pasos y los nuevos sonidos:
+1. Crea lab_v2/pruebas/test_audio_polish.py:
+   - test_pasos_consecutivos_sin_omision: Simula 10 pasos en ráfaga rápida (cada 0.1s) y valida que todos se reproducen y no se descartan.
+   - test_sonido_hover_menu: Valida que Menu emite "hover" al cambiar self.sel con mouse y teclado.
+   - test_conteo_puntaje_final: Valida que durante la animación de puntaje en la pantalla final se emite "conteo" y finalmente "conteo_fin" una única vez.
+   - test_efectos_disponibles: Verifica que "hover", "conteo" y "conteo_fin" existen en Sonidos.
+2. Ejecuta la suite completa de pruebas:
    $env:PYTHONPATH="lab_v2"; python -m unittest discover -s lab_v2/pruebas
-   Verifica que los 244 tests previos más los nuevos pasen con 0 errores y 0 fallos.
+   Verifica que los 251 tests previos más los nuevos pasen con 0 errores y 0 fallos.
 ```
