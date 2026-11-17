@@ -1,335 +1,269 @@
-# Plan de Orquestación Multi-Agente: Sistema de Coleccionables (Estrellas y Cofres), Códice Oculto (Objetos en Incógnita) e Inventario de Equipamiento
+# Plan de Orquestación Multi-Agente: Sistema de Voces de NPCs (Doblaje en Lobby con Anti-Spam) y Corrección de Interacción SEC-08 (Auditoría del Campamento)
 
 **Proyecto:** *Laberinto: El Umbral de Ceniza* (`lab_v2`)  
-**Módulos Afectados:** Motor de Progresión (`juego/inventario.py`), Ciclo de Partida y Generación (`juego/partida.py`), Renderizado Gráfico (`interfaz/render.py`), Pantallas e Interfaz (`interfaz/pantallas.py`) y Banco de Pruebas (`pruebas/test_inventario.py`, `pruebas/test_partida.py`).  
-**Objetivo Fundamental:**
-1. **Calificación Estelar y Coleccionables (Riesgo vs. Recompensa):** Distribuir proceduralmente **3 Estrellas** y **Cofres del Tesoro** en ramales secundarios ciegos del laberinto (fuera de la ruta óptima segura), motivando al jugador a adentrarse en territorio de patrulla enemiga. Calificar cada nivel de **★☆☆ (1 estrella)** a **★★★ (3 estrellas)** según su desempeño y recolección.
-2. **Códice de Colección en Incógnita (Objetos Desconocidos):** Implementar un catálogo completo de **Armas**, **Armaduras** y **Habilidades Pasivas**. Al abrir el inventario, los objetos no encontrados se muestran como **siluetas en penumbra con candado y título `???`** ("Objeto no descubierto: busca en los cofres del laberinto"). Esto fomenta el deseo de explorar y rejugar para completar el 100% de la colección.
-3. **Botín de Cofres y Desbloqueo Dinámico:** Al pisar y abrir un cofre en una partida, se revela y desbloquea un nuevo ítem del códice, emitiendo un anuncio destacado en el HUD, confeti/brasas doradas y guardándolo de forma permanente en `checkpoint.json`.
-4. **Pantalla de Inventario y Equipamiento:** Pantalla interactiva (accesible con tecla `I` o `Tab` tanto en el Campamento como durante la partida) que permite al jugador inspeccionar su colección, ver su progreso (ej. *4/12 Objetos Descubiertos*) y equipar 1 Arma, 1 Armadura y 1 Habilidad activa que alteran sus estadísticas de juego.
+**Módulos Afectados:** Motor de Audio (`interfaz/efectos.py`), Pantallas e Interfaz del Campamento (`interfaz/pantallas.py`), Recursos de Audio (`lab_v2/sonidos/voces/`), y Banco de Pruebas (`pruebas/test_voces_campamento.py`).  
+**Documento de Referencia:** `AUDIT_CAMPAMENTO.md` (Hallazgo **SEC-08** y mitigación complementaria **SEC-11**).
 
 ---
 
-## 1. Topología de Agentes y Matriz de Propiedad Estricta (Zero-Conflict)
+## 1. Objetivos Fundamentales del Plan
 
-Cada agente posee la titularidad exclusiva de un conjunto disjunto de archivos, eliminando colisiones de código y permitiendo desarrollo en paralelo:
+1. **Integración Acústica de las Voces de los 4 NPCs en el Campamento:**
+   - Incorporar los archivos MP3 existentes en el repositorio (`vozmara.mp3`, `voztizon.mp3`, `voznela.mp3`, `vozivo.mp3`).
+   - Normalizar su localización en una estructura de recursos limpia (`lab_v2/sonidos/voces/`) manteniendo compatibilidad con la raíz para evitar errores de ruta.
+   - Vincular la reproducción de la voz correspondiente al interactuar con cada NPC (**Mara**, **Tizón**, **Nela**, **Ivo**) en el Claro de Ceniza.
 
-$$\text{Archivos}(\text{Agent-Economy-Core}) \cap \text{Archivos}(\text{Agent-UI-Inventory}) \cap \text{Archivos}(\text{Agent-QA-Progression}) = \emptyset$$
+2. **Sistema Anti-Spam Estricto (Reproducción Ininterrumpida):**
+   - Si el jugador presiona repetidamente o machaca la tecla de interacción (`E`, `Enter`, `Espacio`), **la voz del NPC NO debe reiniciarse a mitad de frase**.
+   - La frase en curso debe terminar completamente antes de que una nueva interacción pueda disparar el audio otra vez.
+   - El canal de diálogo se monitorea mediante `canal_voz.get_busy()`, ignorando reinicios concurrentes de audio mientras se mantiene el refresco visual del texto y temporizador en pantalla.
+
+3. **Corrección de Defecto Evidente de Jugabilidad de `AUDIT_CAMPAMENTO.md` (SEC-08):**
+   - **Problema Detectado en Auditoría:** La interacción en el campamento utilizaba una cascada lineal rígida `if-elif` con radios gigantes y desproporcionados (Hamaca 120px, Lápidas 140px, Hoguera 125px). Como la Hamaca antecedía a las Lápidas en el código, el jugador estando físicamente sobre las lápidas del cementerio recibía el texto de la hamaca (*"La hamaca está vacía..."*), imposibilitando inspeccionar el cementerio.
+   - **Solución en Jugabilidad:** Reemplazar la cascada rígida por un algoritmo de **Distancia Euclidiana Mínima** (`min(distancia)`) dentro de un radio normalizado (`RADIO_INTERACCION = 85`). El jugador siempre interactuará con el elemento al que realmente esté más cerca.
+   - **Sincronización de HUD (SEC-11):** Sincronizar el cálculo con `_objetivo_cercano()` para que la barra inferior indique contextualmente `"E  ·  EXAMINAR LÁPIDAS"`, `"E  ·  EXAMINAR HAMACA"`, `"E  ·  CONSULTAR MAPA"`, etc.
+
+---
+
+## 2. Topología de Agentes y Matriz de Propiedad Estricta (Zero-Conflict)
+
+Los archivos modificables están estrictamente particionados para garantizar cero solapamiento ni conflictos de merge:
+
+$$\text{Archivos}(\text{Agent-Audio-Voices}) \cap \text{Archivos}(\text{Agent-Lobby-Interaction}) \cap \text{Archivos}(\text{Agent-QA-AudioCamp}) = \emptyset$$
 
 ```mermaid
 graph TD
-    subgraph "WAVE 1: Implementación Paralela de Lógica y Visuales"
-        A1["Agente 1: Agent-Economy-Core<br/>(Códice en Incógnita, Inventario, Cofres y Estrellas)"]
-        A2["Agente 2: Agent-UI-Inventory<br/>(Pantalla Inventario, Sprites de Cofre/Estrella y HUD)"]
+    subgraph "WAVE 1: Implementación Paralela (Audio + Interacción)"
+        A1["Agente 1: Agent-Audio-Voices<br/>(Carga de MP3, Canal Dedicado y Lógica Anti-Spam)"]
+        A2["Agente 2: Agent-Lobby-Interaction<br/>(Disparo de Voces, Selección por Distancia Mínima SEC-08 y HUD)"]
     end
 
-    subgraph "Contratos de Interfaz Compartidos (API Freeze)"
-        C1["lab_v2/juego/inventario.py<br/>Clase: Inventario<br/>Catálogo: CATALOGO_OBJETOS (Armas, Armaduras, Habilidades)<br/>API: descubrir_item(), equipar(), obtener_coleccion()"]
-        C2["lab_v2/juego/partida.py<br/>API: Partida.estrellas, Partida.cofres<br/>API: Partida.recoger_estrella(), Partida.abrir_cofre()<br/>API: estrellas_conseguidas(), puntaje_total()"]
+    subgraph "Contratos de Interfaz Congelados (API Freeze)"
+        C1["lab_v2/interfaz/efectos.py<br/>Sonidos.reproducir_voz(npc_id) -> bool<br/>Sonidos.voz_ocupada() -> bool<br/>lab_v2/sonidos/voces/*.mp3"]
     end
 
-    subgraph "WAVE 2: Aseguramiento de Calidad y Pruebas"
-        A3["Agente 3: Agent-QA-Progression<br/>(Validación de Desbloqueos, Persistencia y Tests 244+)"]
+    subgraph "WAVE 2: Verificación, Anti-Spam y Regresión"
+        A3["Agente 3: Agent-QA-AudioCamp<br/>(Tests Unitarios de Audio, Stress-Test Anti-Spam, Tests SEC-08 y Suite 244+)"]
     end
 
     A1 --> C1
-    A1 --> C2
     C1 -. Consumido por .-> A2
-    C2 -. Consumido por .-> A2
-    C1 --> A3
-    C2 --> A3
+    A1 --> A3
     A2 --> A3
 ```
 
 ### Tabla de Propiedad Exclusiva de Archivos
 
-| Agente | Identificador | Rol Especializado | Modelo Sugerido | Archivos de Escritura Exclusiva | Archivos de Solo Lectura |
+| Agente | Identificador | Rol Especializado | Modelo Recomendado | Archivos de Escritura Exclusiva | Archivos de Solo Lectura |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Agente 1** | `Agent-Economy-Core` | Arquitecto de Progresión, Lógica de Ítems, Estructuras y Partida. | `Claude Sonnet 5.5` | • `lab_v2/juego/inventario.py` *(nuevo)*<br>• `lab_v2/juego/partida.py` | • `lab_v2/interfaz/*`<br>• `lab_v2/pruebas/*`<br>• `lab_v2/estructuras/*` |
-| **Agente 2** | `Agent-UI-Inventory` | Ingeniero de Interfaz, Arte de HUD, Renderizado de Cofres/Estrellas. | `Gemini 4 Argon` | • `lab_v2/interfaz/pantallas.py`<br>• `lab_v2/interfaz/render.py` | • `lab_v2/juego/*`<br>• `lab_v2/pruebas/*`<br>• `lab_v2/datos/*` |
-| **Agente 3** | `Agent-QA-Progression` | Especialista en Pruebas de Persistencia, Mocking y No Regresión. | `Claude Sonnet 5.5` / `Gemini 4 Hydrogen` | • `lab_v2/pruebas/test_inventario.py` *(nuevo)*<br>• `lab_v2/pruebas/test_partida.py` | • Todos los módulos de `lab_v2/juego/*` e `lab_v2/interfaz/*` |
+| **Agente 1** | `Agent-Audio-Voices` | Ingeniero de Audio y Canales de Sonido. | `Claude Sonnet 5.5 (Medium)` | • `lab_v2/interfaz/efectos.py`<br>• `lab_v2/sonidos/voces/` *(carpeta y copias)* | • `lab_v2/interfaz/pantallas.py`<br>• `lab_v2/interfaz/app.py`<br>• `AUDIT_CAMPAMENTO.md` |
+| **Agente 2** | `Agent-Lobby-Interaction` | Desarrollador de Gameplay e Interfaz de Campamento. | `Claude Sonnet 5.5 (Medium)` / `Gemini 4 Argon` | • `lab_v2/interfaz/pantallas.py` | • `lab_v2/interfaz/efectos.py`<br>• `lab_v2/sonidos/voces/*`<br>• `AUDIT_CAMPAMENTO.md` |
+| **Agente 3** | `Agent-QA-AudioCamp` | Ingeniero de Pruebas de Integración y Regresión. | `Claude Sonnet 5.5 (Medium)` | • `lab_v2/pruebas/test_voces_campamento.py` *(nuevo)* | • Todos los módulos de `lab_v2/*` |
 
 ---
 
-## 2. Contratos de Interfaz Compartidos (API Freeze)
+## 3. Contratos de Interfaz Compartidos (API Freeze)
 
-### 2.1. Catálogo e Inventario (`lab_v2/juego/inventario.py`)
+### 3.1. Extensión de la Clase `Sonidos` (`lab_v2/interfaz/efectos.py`)
 
 ```python
-CATEGORIA_ARMA = "arma"
-CATEGORIA_ARMADURA = "armadura"
-CATEGORIA_HABILIDAD = "habilidad"
+class Sonidos:
+    # Identificadores admitidos: "mara", "tizon", "nela", "ivo"
+    VOCES_MAP = {
+        "mara": ["lab_v2/sonidos/voces/mara.mp3", "vozmara.mp3"],
+        "tizon": ["lab_v2/sonidos/voces/tizon.mp3", "voztizon.mp3"],
+        "nela": ["lab_v2/sonidos/voces/nela.mp3", "voznela.mp3"],
+        "ivo": ["lab_v2/sonidos/voces/ivo.mp3", "vozivo.mp3"],
+    }
 
-CATALOGO_OBJETOS = {
-    # ---------------- ARMAS ----------------
-    "espada_ceniza": {
-        "id": "espada_ceniza", "categoria": CATEGORIA_ARMA, "nombre": "Espada de Ceniza",
-        "descripcion": "Hoja imbuida con fuego verde. Corta esqueletos frontales.",
-        "rareza": "Común", "desbloqueado_inicio": True, "icono": "espada"
-    },
-    "daga_sombras": {
-        "id": "daga_sombras", "categoria": CATEGORIA_ARMA, "nombre": "Daga de Sombras",
-        "descripcion": "Ataca en ráfaga circular a enemigos adyacentes a corta distancia.",
-        "rareza": "Rara", "desbloqueado_inicio": False, "icono": "daga"
-    },
-    "baston_centella": {
-        "id": "baston_centella", "categoria": CATEGORIA_ARMA, "nombre": "Bastón de Centella",
-        "descripcion": "Dispara un destello en línea recta que aturde a un enemigo 3s.",
-        "rareza": "Épica", "desbloqueado_inicio": False, "icono": "baston"
-    },
-    # ---------------- ARMADURAS ----------------
-    "manto_viajero": {
-        "id": "manto_viajero", "categoria": CATEGORIA_ARMADURA, "nombre": "Manto del Viajero",
-        "descripcion": "Prenda ligera de tela reforzada. Atuendo inicial.",
-        "rareza": "Común", "desbloqueado_inicio": True, "icono": "tunica"
-    },
-    "coraza_guardian": {
-        "id": "coraza_guardian", "categoria": CATEGORIA_ARMADURA, "nombre": "Coraza del Guardián",
-        "descripcion": "Armadura de placas rúnicas. Otorga +5 movimientos máximos por nivel.",
-        "rareza": "Rara", "desbloqueado_inicio": False, "icono": "coraza"
-    },
-    "manto_bruma": {
-        "id": "manto_bruma", "categoria": CATEGORIA_ARMADURA, "nombre": "Manto de Bruma",
-        "descripcion": "Camuflaje espectral. Reduce en 2 casillas el radio de visión de los enemigos.",
-        "rareza": "Épica", "desbloqueado_inicio": False, "icono": "manto"
-    },
-    # ---------------- HABILIDADES PASIVAS ----------------
-    "paso_ligero": {
-        "id": "paso_ligero", "categoria": CATEGORIA_HABILIDAD, "nombre": "Paso Ligero",
-        "descripcion": "Desplazamiento ágil en el campamento y mayor fluidez al deslizar muros.",
-        "rareza": "Común", "desbloqueado_inicio": True, "icono": "bota"
-    },
-    "ojo_zahori": {
-        "id": "ojo_zahori", "categoria": CATEGORIA_HABILIDAD, "nombre": "Ojo del Zahorí",
-        "descripcion": "El resplandor de la linterna revela la dirección del cofre más cercano.",
-        "rareza": "Rara", "desbloqueado_inicio": False, "icono": "ojo"
-    },
-    "escudo_eco": {
-        "id": "escudo_eco", "categoria": CATEGORIA_HABILIDAD, "nombre": "Velo contra el Eco",
-        "descripcion": "Retrasa la persecución de tu sombra (+2 pasos de gracia de la Cola).",
-        "rareza": "Épica", "desbloqueado_inicio": False, "icono": "escudo"
-    },
-}
-
-class Inventario:
-    def __init__(self, datos_guardados=None):
+    def reproducir_voz(self, nombre_npc: str) -> bool:
         """
-        Gestiona la colección de objetos descubiertos y el equipamiento activo.
-        Si datos_guardados es None, desbloquea solo los iniciales.
-        """
-        self.desbloqueados = set()
-        self.arma_equipada = "espada_ceniza"
-        self.armadura_equipada = "manto_viajero"
-        self.habilidad_equipada = "paso_ligero"
-        self.oro = 0
-        self.estrellas_totales = 0
-        ...
-
-    def obtener_coleccion(self) -> list[dict]:
-        """
-        Retorna la lista de todos los objetos del catálogo.
-        Si el ítem NO ha sido descubierto:
-            nombre = "???"
-            descripcion = "Objeto desconocido. Explora los ramales del laberinto y abre cofres para revelarlo."
-            icono = "incognita"
-            descubierto = False
-        Si HA SIDO descubierto:
-            descubierto = True (muestra nombre real, descripción y atributos).
+        Reproduce el archivo de voz del NPC en un canal dedicado.
+        
+        PROTECCIÓN ANTI-SPAM:
+        - Si el canal de voz actual está reproduciendo (self.canal_voz.get_busy()),
+          RETORNA False INMEDIATAMENTE y NO reinicia el sonido a media frase.
+        - Si el canal está libre, reproduce el audio y retorna True.
+        - En caso de silencio (silenciado=True) o mixer inactivo, retorna False sin arrojar excepciones.
         """
         ...
 
-    def descubrir_item(self, id_item: str) -> bool:
-        """Desbloquea un ítem en el códice. Retorna True si era nuevo."""
+    def voz_ocupada(self) -> bool:
+        """Retorna True si un diálogo de voz está sonando actualmente."""
         ...
 
-    def equipar(self, id_item: str) -> bool:
-        """Equipa un ítem descubierto en su ranura correspondiente."""
+    def detener_voz(self) -> None:
+        """Fuerza la detención de la voz activa si fuera necesario (ej. cambio de pantalla)."""
         ...
-
-    def to_dict(self) -> dict: ...
-    @classmethod
-    def from_dict(cls, datos: dict) -> "Inventario": ...
 ```
 
-### 2.2. Generación y Recolección en Partida (`lab_v2/juego/partida.py`)
+### 3.2. Contrato de Interacción y Prioridad en `Campamento` (`lab_v2/interfaz/pantallas.py`)
 
 ```python
-class Partida:
-    # Atributos añadidos en __init__:
-    # self.estrellas = [(f, c), ...]  # 3 casillas de estrellas en ramales
-    # self.estrellas_recogidas = 0
-    # self.cofres = [{"casilla": (f, c), "abierto": False, "contenido": id_item_o_oro}]
-    # self.cofres_abiertos = 0
-
-    def recoger_estrella(self) -> bool:
-        """Si el jugador está sobre una estrella no recogida, la toma (+150 pts)."""
-        ...
-
-    def abrir_cofre(self) -> dict | None:
-        """Si el jugador está sobre un cofre cerrado, lo abre y entrega el botín."""
-        ...
-
-    def estrellas_conseguidas(self) -> int:
-        """Retorna cuántas estrellas (1, 2 o 3) se han ganado al terminar."""
-        ...
+# Puntos de interés del Claro de Ceniza con radio estandarizado y descripción
+PUNTOS_CAMPAMENTO = [
+    {"id": "umbral", "nombre": "E  ·  ABRIR EL UMBRAL", "radio": 135},
+    {"id": "mara", "nombre": "E  ·  HABLAR CON MARA", "radio": RADIO_INTERACCION, "voz": "mara"},
+    {"id": "ivo", "nombre": "E  ·  HABLAR CON IVO", "radio": RADIO_INTERACCION, "voz": "ivo"},
+    {"id": "nela", "nombre": "E  ·  HABLAR CON NELA", "radio": RADIO_INTERACCION, "voz": "nela"},
+    {"id": "tizon", "nombre": "E  ·  TRUEQUE CON TIZÓN", "radio": RADIO_INTERACCION, "voz": "tizon"},
+    {"id": "hamaca", "nombre": "E  ·  EXAMINAR HAMACA", "radio": 75},
+    {"id": "mapa", "nombre": "E  ·  CONSULTAR MAPA", "radio": 80},
+    {"id": "hoguera", "nombre": "E  ·  DESCANSAR EN LA HOGUERA", "radio": 80},
+    {"id": "carro", "nombre": "E  ·  INSPECCIONAR CARRO", "radio": 75},
+    {"id": "lapidas", "nombre": "E  ·  EXAMINAR LÁPIDAS", "radio": 85},
+]
 ```
 
 ---
 
-## 3. Plan de Ejecución por Oleadas (Waves)
-
----
-
-### WAVE 1: Implementación Paralela de Progresión y Gráficos
+## 4. Plan de Ejecución por Oleadas (Waves)
 
 ```text
-├── [T-01] [Agent-Economy-Core] Módulo de Inventario, Códice de Incógnitas y Persistencia (inventario.py)
-├── [T-02] [Agent-Economy-Core] Generación de 3 Estrellas y Cofres con Botín en Partida (partida.py)
-├── [T-03] [Agent-UI-Inventory] Renderizado estético de Estrellas flotantes y Cofres (render.py)
-└── [T-04] [Agent-UI-Inventory] Pantalla de Inventario / Códice Oculto y HUD de Estrellas (pantallas.py)
+├── WAVE 1 (Paralelo):
+│   ├── [T-01] [Agent-Audio-Voices] Gestor de Voces de NPCs y Protección Anti-Spam (efectos.py)
+│   └── [T-02] [Agent-Lobby-Interaction] Disparo de Voces y Resolución Bug SEC-08 (pantallas.py)
+└── WAVE 2 (Verificación):
+    └── [T-03] [Agent-QA-AudioCamp] Banco de Pruebas de Audio, Anti-Spam y Regresión Campamento (test_voces_campamento.py)
 ```
 
-#### `[T-01]` Módulo de Inventario, Códice de Incógnitas y Persistencia
-* **Agente Asignado:** `Agent-Economy-Core`
+---
+
+### WAVE 1: Implementación Paralela (Audio + Interacción)
+
+#### `[T-01]` Gestor de Voces de NPCs y Protección Anti-Spam
+* **Agente Asignado:** `Agent-Audio-Voices`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)`
-* **Archivos Objetivo:** `lab_v2/juego/inventario.py`
-* **Dependencias:** Inicio inmediato.
+* **Archivos de Escritura Exclusiva:** `lab_v2/interfaz/efectos.py`, `lab_v2/sonidos/voces/`
+* **Dependencias:** Ninguna (inicio inmediato).
 * **Instrucciones Técnicas:**
-  1. Crear `lab_v2/juego/inventario.py` implementando el catálogo estructurado `CATALOGO_OBJETOS` con las 3 categorías (Armas, Armaduras, Habilidades).
-  2. Implementar la clase `Inventario`:
-     - Método `obtener_coleccion()` que enmascare como `"???"` con icono `"incognita"` cualquier objeto no registrado en `self.desbloqueados`.
-     - Métodos `descubrir_item(id_item)` y `equipar(id_item)`.
-     - Serialización limpia `to_dict()` y `from_dict()` compatible con JSON.
-     - Métodos auxiliares para sortear un ítem no descubierto al abrir cofres: si todos fueron descubiertos, entrega una bolsa de oro (50 a 100 de oro).
-* **Criterio de Verificación:**
-  - `Inventario()` nuevo devuelve los 3 ítems iniciales descubiertos y el resto en incógnita (`descubierto=False`, `nombre="???"`). Al llamar `descubrir_item("daga_sombras")`, este pasa a ser visible y equipable.
+  1. Crear el directorio `lab_v2/sonidos/voces/` y copiar allí `vozmara.mp3 -> mara.mp3`, `voztizon.mp3 -> tizon.mp3`, `voznela.mp3 -> nela.mp3`, `vozivo.mp3 -> ivo.mp3`, manteniendo copias de respaldo o tolerando búsqueda en la raíz.
+  2. En `lab_v2/interfaz/efectos.py`:
+     - Asignar y reservar un canal específico para diálogos vocales (ej. `self.canal_voz = pygame.mixer.Channel(7)` con `set_reserved(1)`).
+     - Cargar las pistas de voz en `self.voces = {}` mediante `pygame.mixer.Sound(ruta)` con manejo seguro de excepciones (`pygame.error`, `FileNotFoundError`).
+     - Implementar `reproducir_voz(nombre_npc)` con la **regla de anti-spam estricta**:
+       ```python
+       if self.canal_voz and self.canal_voz.get_busy():
+           return False  # El NPC está hablando: NO reiniciar
+       ```
+     - Implementar `voz_ocupada()` y `detener_voz()`.
+  3. Comprobar que en entornos sin audio (`self.activo == False`) el juego continúe funcionando silenciosamente sin lanzar excepciones.
+
+#### `[T-02]` Disparo de Voces y Resolución Bug SEC-08 (Auditoría del Campamento)
+* **Agente Asignado:** `Agent-Lobby-Interaction`
+* **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)` / `Gemini 4 Argon`
+* **Archivos de Escritura Exclusiva:** `lab_v2/interfaz/pantallas.py`
+* **Dependencias:** Inicio en paralelo (respeta el contrato de `Sonidos.reproducir_voz`).
+* **Instrucciones Técnicas:**
+  1. **Solución del Bug SEC-08 (Enmascaramiento de Interacciones):**
+     - En `Campamento._interactuar()`, eliminar la cascada `if-elif` rígida y con radios sobredimensionados.
+     - Implementar la selección del objetivo por **distancia euclidiana mínima** calculando la distancia del personaje a cada punto de interés y escogiendo el más cercano dentro de su radio válido (`min(candidatos_en_rango, key=distancia)`).
+     - Ajustar las coordenadas y radios para que las Lápidas (`166, 290`) ya no sean absorbidas por la Hamaca (`266, 356`).
+  2. **Integración de Voces de NPCs:**
+     - Al interactuar con Mara: activar diálogo y llamar `self.app.sonidos.reproducir_voz("mara")`.
+     - Al interactuar con Ivo: activar diálogo y llamar `self.app.sonidos.reproducir_voz("ivo")`.
+     - Al interactuar con Nela: activar diálogo y llamar `self.app.sonidos.reproducir_voz("nela")`.
+     - Al interactuar con Tizón: activar diálogo y llamar `self.app.sonidos.reproducir_voz("tizon")`.
+  3. **Sincronización del HUD Contextual (SEC-11):**
+     - Actualizar `_objetivo_cercano()` para que incluya todos los puntos interactivos del campamento (Lápidas, Carro, Hamaca, Mapa, Hoguera), mostrando en la barra inferior `"E · EXAMINAR LÁPIDAS"`, etc.
 
 ---
 
-#### `[T-02]` Generación de 3 Estrellas y Cofres con Botín en Partida
-* **Agente Asignado:** `Agent-Economy-Core`
+### WAVE 2: Verificación, Anti-Spam y Regresión
+
+#### `[T-03]` Banco de Pruebas de Audio, Anti-Spam y Regresión Campamento
+* **Agente Asignado:** `Agent-QA-AudioCamp`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)`
-* **Archivos Objetivo:** `lab_v2/juego/partida.py`
-* **Dependencias:** `[T-01]`
+* **Archivos de Escritura Exclusiva:** `lab_v2/pruebas/test_voces_campamento.py`
+* **Dependencias:** `[T-01]`, `[T-02]`
 * **Instrucciones Técnicas:**
-  1. En `Partida.__init__`:
-     - Llamar a `self._crear_estrellas(3)`: buscar 3 casillas transitables en ramales secundarios que no toquen la ruta directa a la salida (`solucion`).
-     - Llamar a `self._crear_cofres(1 if nivel["filas"] < 12 else 2)`: situar cofres en esquinas de ramales lejanos con botín del códice.
-  2. Implementar `recoger_estrella()` y `abrir_cofre()` en el ciclo de movimiento:
-     - Si `self.jugador.posicion` coincide con una estrella, se retira de la lista y suma a `self.estrellas_recogidas`.
-     - Si coincide con un cofre cerrado, cambia su estado a `abierto = True` y entrega su contenido.
-  3. Actualizar `Partida.puntaje()`:
-     $$\text{puntaje} = \text{base} + (\text{movimientos\_restantes} \times 10) + (\text{estrellas\_recogidas} \times 150) + \text{oro\_partida}$$
-  4. Implementar `estrellas_conseguidas()`:
-     - 1 Estrella: Ganar la partida llegando a la meta.
-     - 2 Estrellas: Ganar habiendo recogido al menos 2 estrellas o 1 cofre.
-     - 3 Estrellas: Ganar habiendo recogido las 3 estrellas del nivel.
-* **Criterio de Verificación:**
-  - Toda partida creada genera exactamente 3 estrellas y al menos 1 cofre en ramales válidos sin bloquear el camino principal.
+  1. Crear `lab_v2/pruebas/test_voces_campamento.py` con pruebas unitarias y de integración:
+     - `test_carga_archivos_voces`: Verificar que los 4 archivos de audio existen y son cargados correctamente por `Sonidos`.
+     - `test_antispam_canal_ocupado`: Simular 10 pulsaciones rápidas consecutivas sobre Mara y verificar que `reproducir_voz` solo ejecuta una vez y rechaza los reinicios mientras el canal esté ocupado (`busy`).
+     - `test_resolucion_sec08_lapidas_vs_hamaca`: Situar al jugador en `(180, 300)` (junto a las lápidas) y comprobar que la interacción seleccionada son las Lápidas y NO la Hamaca.
+     - `test_hud_contextual_objetos`: Verificar que `_objetivo_cercano()` devuelve el texto correcto para cada objeto.
+  2. Ejecutar la suite completa del proyecto (`python -m unittest discover -s lab_v2/pruebas`) asegurando que los 244 tests previos más los nuevos pasen con resultado exitoso (0 fallos, 0 errores).
 
 ---
 
-#### `[T-03]` Renderizado Estético de Estrellas Flotantes y Cofres
-* **Agente Asignado:** `Agent-UI-Inventory`
-* **Modelo Recomendado:** `Gemini 4 Argon (Medium)`
-* **Archivos Objetivo:** `lab_v2/interfaz/render.py`
-* **Dependencias:** Inicio inmediato (contratos de firmas visuales).
-* **Instrucciones Técnicas:**
-  1. Implementar `dibujar_estrella(surf, cx, cy, cell, t)`:
-     - Estrella dorada/gema centelleante con levitación senoidal `math.sin(t * 3.5) * 3` px.
-     - Partículas sutiles de polvo dorado a su alrededor.
-  2. Implementar `dibujar_cofre(surf, cx, cy, cell, t, abierto=False)`:
-     - Cofre de madera noble con herrajes de bronce.
-     - Si `abierto=False`: cofre cerrado con brillo ámbar tenue.
-     - Si `abierto=True`: tapa levantada mostrando resplandor interior.
-  3. Implementar `dibujar_icono_item(surf, rect, tipo_icono, descubierto=True)`:
-     - Si `descubierto=False`: dibuja un candado o silueta oscura con un signo `?` centrado en gris/bronce.
-     - Si `descubierto=True`: dibuja el icono distintivo (espada, daga, bastón, túnica, coraza, bota, ojo, escudo).
-* **Criterio de Verificación:**
-  - El módulo compila sin errores y renderiza correctamente estrellas levitantes y cofres en ambas fases (cerrado/abierto).
+## 5. Asignación de Agentes, Modelos y Prompts de Ejecución
+
+### Resumen de Recursos Necesarios
+* **Total de Agentes Requeridos:** 3 agentes en 2 oleadas (Wave 1: 2 agentes paralelos; Wave 2: 1 agente de control de calidad).
+* **Modelos Aptos:**
+  - `Claude Sonnet 5.5 (Medium)` para lógica de canales de audio, anti-spam y suite de tests.
+  - `Claude Sonnet 5.5` o `Gemini 4 Argon` para interfaz de campamento y matemáticas de proximidad espacial.
 
 ---
 
-#### `[T-04]` Pantalla de Inventario / Códice Oculto y HUD de Estrellas
-* **Agente Asignado:** `Agent-UI-Inventory`
-* **Modelo Recomendado:** `Gemini 4 Argon (Medium)`
-* **Archivos Objetivo:** `lab_v2/interfaz/pantallas.py`
-* **Dependencias:** `[T-01]`, `[T-02]`, `[T-03]`
-* **Instrucciones Técnicas:**
-  1. En `Juego`:
-     - Dibujar las estrellas y cofres en el tablero llamando a las funciones de `render.py`.
-     - Al recoger una estrella o abrir un cofre: reproducir sonido (`guardar`), emitir partículas y mostrar alerta en pantalla (*"¡Has descubierto Daga de Sombras!"*).
-     - Añadir contador visual de 3 estrellas en el HUD superior: `★ ★ ☆`.
-     - Al ganar, la pantalla final muestra las 3 estrellas grandes animándose con fanfarria.
-  2. Crear clase `PantallaInventario(Pantalla)`:
-     - Accesible pulsando la tecla `I` o `Tab` desde `Juego` o `Campamento`.
-     - **Sección Izquierda:** Visualización del Viajero con sus 3 ranuras equipadas (Arma, Armadura, Pasiva).
-     - **Sección Central (El Códice):** Cuadrícula dividida por pestañas o bloques (Armas, Armaduras, Habilidades). Los ítems bloqueados lucen oscuros con `???` y los descubiertos muestran sus colores de rareza.
-     - **Sección Derecha (Ficha de Objeto):** Al hacer clic en un objeto descubierto, muestra su nombre, descripción de historia (*lore*), bonificación y botón `"Equipar"`. Si es incógnita, muestra: *"Aún no has encontrado este artefacto. Explora los cofres del laberinto para descubrirlo."*
-     - Botón de volver o reanudar partida.
-* **Criterio de Verificación:**
-  - Pulsar `I` en cualquier momento abre limpiamente el inventario interactivo; se pueden equipar ítems descubiertos y los no descubiertos permanecen en secreto como `???`.
-
----
-
-### WAVE 2: Aseguramiento de Calidad y Suite de Pruebas
-
+### 📋 PROMPT LISTO PARA AGENTE 1 (`Agent-Audio-Voices`)
 ```text
-├── [T-05] [Agent-QA-Progression] Suite Unitaria de Inventario y Códice Oculto (test_inventario.py)
-├── [T-06] [Agent-QA-Progression] Pruebas de Estrellas, Cofres y Calificación 1-3 en Partida (test_partida.py)
-└── [T-07] [Agent-QA-Progression] Verificación Global de Calidad (Pase 100% de la Suite 250+ tests)
+Rol: Agent-Audio-Voices (Ingeniero de Audio y Canales de Sonido)
+Modelo Recomendado: Claude Sonnet 5.5 (Medium)
+Archivos de Escritura Exclusiva:
+- lab_v2/interfaz/efectos.py
+- lab_v2/sonidos/voces/ (crear carpeta y copiar archivos mp3)
+Archivos de Solo Lectura:
+- lab_v2/interfaz/pantallas.py
+- AUDIT_CAMPAMENTO.md
+
+Tu misión es implementar la carga de voces y el sistema de reproducción con protección anti-spam en lab_v2:
+1. En la raíz del proyecto existen 4 archivos: vozmara.mp3, voztizon.mp3, voznela.mp3 y vozivo.mp3.
+   Crea el directorio lab_v2/sonidos/voces/ y copia allí los archivos renombrándolos a mara.mp3, tizon.mp3, nela.mp3 e ivo.mp3 (mantén compatibilidad para buscar tanto en esa ruta como en la raíz).
+2. En lab_v2/interfaz/efectos.py extiende la clase Sonidos:
+   - Configura un canal de audio reservado para voces de personajes (self.canal_voz = pygame.mixer.Channel(7) o similar, con pygame.mixer.set_reserved(1)).
+   - Carga las voces en un diccionario self.voces con control seguro de excepciones.
+   - Implementa reproducir_voz(nombre_npc):
+     * REQUISITO CLAVE ANTI-SPAM: Si self.canal_voz.get_busy() es True, RETORNA False y NO REINICIES el sonido a media frase. Deja que el diálogo actual termine de hablar por completo.
+     * Si no está ocupado, reproduce la voz y retorna True.
+   - Implementa voz_ocupada() -> bool y detener_voz() -> None.
+   - Asegura degradación suave: si el mixer no inicializa (modo headless o sin audio), no arrojes errores.
+3. No toques archivos fuera de tu titularidad. Al terminar, notifica el freeze de la API.
 ```
 
-#### `[T-05]` Suite Unitaria de Inventario y Códice Oculto
-* **Agente Asignado:** `Agent-QA-Progression`
-* **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)` o `Gemini 4 Hydrogen (Medium)`
-* **Archivos Objetivo:** `lab_v2/pruebas/test_inventario.py` *(nuevo archivo)*
-* **Dependencias:** `[T-01]` finalizado.
-* **Instrucciones Técnicas:**
-  1. `test_inicializacion_descubiertos()`: Comprobar que solo los ítems marcados por defecto están descubiertos y el resto permanece en incógnita.
-  2. `test_mascara_incognita()`: Comprobar que para ítems no descubiertos, `obtener_coleccion()` oculta el nombre real con `"???"` y no filtra descripciones ni atributos.
-  3. `test_descubrir_y_equipar()`: Descubrir un ítem, verificar que `descubierto == True`, equiparlo y verificar que `arma_equipada` / `armadura_equipada` se actualiza.
-  4. `test_no_se_puede_equipar_incognita()`: Intentar equipar un ítem no descubierto; debe retornar `False`.
-  5. `test_serializacion_json()`: Serializar con `to_dict()`, reconstruir con `from_dict()` y comprobar igualdad idéntica de estados.
-* **Criterio de Verificación:**
-  - `python -m unittest lab_v2/pruebas/test_inventario.py` ejecuta y aprueba todos los tests.
+---
+
+### 📋 PROMPT LISTO PARA AGENTE 2 (`Agent-Lobby-Interaction`)
+```text
+Rol: Agent-Lobby-Interaction (Desarrollador de Gameplay e Interfaz de Campamento)
+Modelo Recomendado: Claude Sonnet 5.5 (Medium) / Gemini 4 Argon
+Archivos de Escritura Exclusiva:
+- lab_v2/interfaz/pantallas.py
+Archivos de Solo Lectura:
+- lab_v2/interfaz/efectos.py
+- AUDIT_CAMPAMENTO.md
+
+Tu misión es integrar la reproducción de voces en el Claro de Ceniza y corregir el bug de jugabilidad SEC-08 de AUDIT_CAMPAMENTO.md:
+1. Corrección del Bug SEC-08 (Enmascaramiento de interacción):
+   - En la clase Campamento, reemplaza la cascada lineal rígida if-elif de _interactuar() por una selección basada en distancia euclidiana mínima (min(candidatos_en_rango, key=lambda c: c['distancia'])).
+   - Corrige las colisiones de radios (especialmente Hamaca vs Lápidas): un jugador junto a las lápidas (166, 290) debe examinar las lápidas y no la hamaca.
+   - Normaliza los radios de interacción a valores razonables (85px para NPCs y lápidas, 75-80px para hamaca, carro, mapa y hoguera).
+2. Integración de Voces de NPCs:
+   - Al interactuar con Mara, Ivo, Nela o Tizón, además de mostrar el texto y mensaje_tiempo, llama a self.app.sonidos.reproducir_voz(nombre_npc).
+   - Recuerda que reproducir_voz cuenta con protección anti-spam, por lo que puedes llamarlo en cada interacción de forma segura.
+3. Indicadores de HUD Contextual (SEC-11):
+   - Actualiza _objetivo_cercano() para que devuelva la etiqueta contextual correspondiente para TODOS los objetos interactivos (Lápidas, Carro, Hamaca, Hoguera, Mapa, además de los NPCs y el Umbral).
+4. Respeta tu titularidad de archivos exclusiva (solo lab_v2/interfaz/pantallas.py).
+```
 
 ---
 
-#### `[T-06]` Pruebas de Estrellas, Cofres y Calificación 1-3 en Partida
-* **Agente Asignado:** `Agent-QA-Progression`
-* **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)` o `Gemini 4 Hydrogen (Medium)`
-* **Archivos Objetivo:** `lab_v2/pruebas/test_partida.py`
-* **Dependencias:** `[T-02]` finalizado.
-* **Instrucciones Técnicas:**
-  1. `test_generacion_3_estrellas()`: Comprobar que en cualquier partida válida se generan exactamente 3 estrellas en casillas transitables.
-  2. `test_estrellas_no_bloquean_salida()`: Las estrellas no deben obstaculizar la ruta directa.
-  3. `test_recoleccion_estrella_suma_puntaje()`: Colocar al jugador sobre una estrella; invocar recolección y verificar que `estrellas_recogidas == 1` y aumenta el puntaje.
-  4. `test_abrir_cofre_entrega_botin()`: Colocar al jugador sobre un cofre cerrado; verificar que al abrirlo entrega un ítem o recompensa válida y no puede volver a abrirse.
-  5. `test_escala_estrellas_1_2_3()`: Validar que llegar a la salida sin estrellas otorga 1 estrella, con 2 otorga 2 estrellas, y con 3 otorga la calificación perfecta de 3 estrellas.
-* **Criterio de Verificación:**
-  - `python -m unittest lab_v2/pruebas/test_partida.py` aprueba al 100% conservando todos los casos previos.
+### 📋 PROMPT LISTO PARA AGENTE 3 (`Agent-QA-AudioCamp`)
+```text
+Rol: Agent-QA-AudioCamp (Ingeniero de Pruebas de Integración y Regresión)
+Modelo Recomendado: Claude Sonnet 5.5 (Medium)
+Archivos de Escritura Exclusiva:
+- lab_v2/pruebas/test_voces_campamento.py
+Archivos de Solo Lectura:
+- Todos los módulos de lab_v2/*
 
----
-
-#### `[T-07]` Verificación Global de Calidad (Pase 100% de la Suite 250+ Tests)
-* **Agente Asignado:** `Agent-QA-Progression`
-* **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)`
-* **Archivos Objetivo:** Solo lectura / Validación.
-* **Dependencias:** `[T-01]` hasta `[T-06]` completados.
-* **Instrucciones Técnicas:**
-  1. Ejecutar `$env:PYTHONPATH="lab_v2"; python -m unittest discover -s lab_v2/pruebas`.
-  2. Comprobar que los 244 tests previos siguen en verde más los nuevos tests de inventario y estrellas.
-* **Criterio de Verificación:**
-  - Consola final: `Ran 250+ tests ... OK`.
-
----
-
-## 4. Matriz de Asignación de Modelos
-
-| Agente | Nombre de Rol | Modelo Asignado | Justificación Técnica de Idoneidad |
-| :--- | :--- | :--- | :--- |
-| **Agente 1** | `Agent-Economy-Core` | **Claude Sonnet 5.5 (Medium)** | Precisión absoluta en modelado de datos de inventario, colecciones ocultas, serialización JSON limpia y colocación procedural en grafos de laberinto. |
-| **Agente 2** | `Agent-UI-Inventory` | **Gemini 4 Argon (Medium)** | Especialista en diseño visual de interfaces de usuario (Pixel Art UI), maquetación de cuadrículas interactivas, renderizado senoidal de sprites y animaciones HUD. |
-| **Agente 3** | `Agent-QA-Progression` | **Claude Sonnet 5.5 (Medium)** / **Gemini 4 Hydrogen** | Rigor exhaustivo en pruebas de enmascaramiento de incógnitas (`???`), validación de contratos entre módulos y garantía estricta de no-regresión. |
-| **Supervisor** | `Orchestrator` | **Orchestrator (Argon)** | Monitorización de dependencias entre oleadas, revisión de contratos de API congelados y resolución de discrepancias. |
+Tu misión es verificar formalmente la integración de voces, la protección anti-spam y la corrección SEC-08:
+1. Crea lab_v2/pruebas/test_voces_campamento.py:
+   - test_carga_voces_existentes: Verifica que las 4 voces (mara, tizon, nela, ivo) son localizadas y cargadas.
+   - test_proteccion_antispam_voces: Comprueba con un mock o canal que si canal.get_busy() es True, reproducir_voz rechaza la invocación sin reiniciar la pista.
+   - test_correccion_sec08_lapidas_prioridad: Coloca al personaje junto al cementerio y valida que _interactuar() selecciona las lápidas y no la hamaca.
+   - test_hud_contextual_completo: Valida que _objetivo_cercano() reconoce lápidas, carro, hoguera, etc.
+2. Ejecuta la suite completa de pruebas:
+   python -m unittest discover -s lab_v2/pruebas
+   Verifica que los 244 tests de regresión previos más los nuevos pasen con 0 errores y 0 fallos.
+```
