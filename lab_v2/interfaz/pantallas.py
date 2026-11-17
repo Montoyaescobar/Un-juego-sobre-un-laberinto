@@ -377,8 +377,10 @@ class Menu(Pantalla):
         if e.type == pygame.KEYDOWN:
             if e.key in (pygame.K_UP, pygame.K_w):
                 self.sel = (self.sel - 1) % len(self.opciones)
+                self.app.sonidos.reproducir("hover")
             elif e.key in (pygame.K_DOWN, pygame.K_s):
                 self.sel = (self.sel + 1) % len(self.opciones)
+                self.app.sonidos.reproducir("hover")
             elif e.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 if self._disponible(self.sel):
                     self.app.sonidos.reproducir("clic")
@@ -394,6 +396,8 @@ class Menu(Pantalla):
         mouse = pygame.mouse.get_pos()
         for i, (_, rect, _, _, _) in enumerate(self.opciones):
             if rect.collidepoint(mouse):
+                if self.sel != i:
+                    self.app.sonidos.reproducir("hover")
                 self.sel = i
         self.ambiente.actualizar(dt, self.app.efectos > 0)
         for i in range(len(self.hover)):
@@ -2282,6 +2286,8 @@ class Juego(Pantalla):
                 self.modo = "nombre" if self.partida.estado == GANO else "opciones"
                 self.pop = 0.0
                 self.t_fin = 0.0
+                self._ultimo_puntaje_mostrado = 0
+                self._conteo_fin_sonado = False
                 self._armar_botones_fin()
         if self.modo in ("nombre", "opciones"):
             self.pop = min(1.0, self.pop + dt * 3.2)
@@ -2691,7 +2697,17 @@ class Juego(Pantalla):
                 texto(surf, b, 18, VERDE, (rect.right - 60, y), "topright", sombra=False, negrita=True)
             separador(surf, rect.x + 50, rect.right - 50, rect.y + 230, BORDE)
             texto(surf, "PUNTAJE", 26, ORO, (rect.x + 60, rect.y + 242), negrita=True)
-            mostrado = int(p.puntaje() * self._ease(min(1.0, self.t_fin / 1.2)))   # el puntaje sube
+            progreso_fin = min(1.0, self.t_fin / 1.2)
+            mostrado = int(p.puntaje() * self._ease(progreso_fin))   # el puntaje sube
+            if self.t_fin <= 0.0:
+                self._ultimo_puntaje_mostrado = 0
+                self._conteo_fin_sonado = False
+            if mostrado > getattr(self, "_ultimo_puntaje_mostrado", 0):
+                self.app.sonidos.reproducir("conteo")
+            self._ultimo_puntaje_mostrado = mostrado
+            if progreso_fin >= 1.0 and not getattr(self, "_conteo_fin_sonado", False):
+                self._conteo_fin_sonado = True
+                self.app.sonidos.reproducir("conteo_fin")
             texto(surf, str(mostrado), 48, ORO, (rect.right - 60, rect.y + 228), "topright",
                   negrita=True)
             if self.modo == "nombre":
