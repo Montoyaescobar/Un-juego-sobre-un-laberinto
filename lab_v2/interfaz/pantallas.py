@@ -293,6 +293,8 @@ class Menu(Pantalla):
             ("SALIR", pygame.Rect(726, 468, 330, 48), app.salir, ROJO, False),
         ]
         self.hover = [0.0] * len(self.opciones)     # 0 a 1: cuánto se corre cada tabla al elegirla
+        if hasattr(self.app.sonidos, "reproducir_musica"):
+            self.app.sonidos.reproducir_musica("menu")
 
     def _disponible(self, indice):
         """Dice si una opción del menú se puede elegir. Recibe: indice (0 = CONTINUAR). Devuelve: True si hay punto seguro guardado (solo CONTINUAR lo exige)."""
@@ -662,6 +664,8 @@ class Campamento(Pantalla):
         self.controlador.posicion = self.personaje
         self._tiempo_paso = 0.0
         self._tiempo_polvo = 0.0
+        if hasattr(self.app.sonidos, "reproducir_musica"):
+            self.app.sonidos.reproducir_musica("campamento")
 
     def evento(self, e):
         """Teclas del campamento: Esc/Retroceso vuelven al menú, E/Enter/Espacio interactúan, L alterna la antorcha y las flechas/WASD se anotan para mover. Recibe: e. Devuelve: nada."""
@@ -1224,6 +1228,8 @@ class Niveles(Pantalla):
         self._cabecera.fill((0, 0, 0, 96))       # oscurece el paisaje para que se lea el nombre
         self.volver = Boton("Al campamento", (70, 620, 220, 52),
                             lambda: app.ir_a(Campamento(app)), "Esc", APAGADO, 20)
+        if hasattr(self.app.sonidos, "reproducir_musica"):
+            self.app.sonidos.reproducir_musica("menu")
 
     def _elegir(self, i):
         """(Interno) Empieza una partida con el nivel i. Recibe: i. Devuelve: nada."""
@@ -1394,6 +1400,8 @@ class Juego(Pantalla):
         self.botones_pausa = []
         self.botones_fin = []
         self._armar_pausa()
+        if hasattr(self.app.sonidos, "reproducir_musica"):
+            self.app.sonidos.reproducir_musica("laberinto")
 
     # ------------------------------------------------------------ acciones del jugador
     def _crear_trampa(self):
@@ -1882,6 +1890,7 @@ class Juego(Pantalla):
                         botin_cofre = c_ant
                         break
             px_j, py_j = self._px(*self.partida.jugador.posicion)
+            self.app.sonidos.reproducir("paso")
             if botin_cofre is not None:
                 self.alerta = self._procesar_botin_cofre(botin_cofre)
                 self.alerta_tiempo = 2.8
@@ -1893,8 +1902,6 @@ class Juego(Pantalla):
                 self.alerta_tiempo = 2.2
                 self.particulas.emitir(px_j, py_j, ORO, 22, 120, 0.9, 3)
                 self.app.sonidos.reproducir("guardar")
-            else:
-                self.app.sonidos.reproducir("paso")
         else:
             self.app.sonidos.reproducir("pared")
             self.shake = max(self.shake, 3.0)
@@ -1963,11 +1970,15 @@ class Juego(Pantalla):
         self.espera = 1.1 if self.partida.estado == GANO else 0.65
         if self.partida.estado == GANO:
             self.app.sonidos.reproducir("ganar")
+            if hasattr(self.app.sonidos, "reproducir_musica"):
+                self.app.sonidos.reproducir_musica("victoria")
             self.particulas.confeti(ANCHO)
             x, y = self._px(*self.vis_j)
             self.particulas.emitir(x, y, ORO, 50, 220, 1.0, 4)
         else:
             self.app.sonidos.reproducir("perder")
+            if hasattr(self.app.sonidos, "reproducir_musica"):
+                self.app.sonidos.reproducir_musica("derrota")
             self.shake = max(self.shake, 18.0)
 
     # ------------------------------------------------------------ pausa y final
@@ -2246,8 +2257,24 @@ class Juego(Pantalla):
             else:
                 objetivo = 0.0
             vel_peligro = 8.0 if cerca_persecucion <= 4 else 6.0
+            peligro_previo = self.peligro
             self.peligro += (objetivo - self.peligro) * min(1.0, dt * vel_peligro)
             self.ambiente.nivel_peligro = self.peligro
+            if (
+                self.peligro > 0.45
+                or cerca_persecucion <= 3
+                or (peligro_previo > 0.45 and self.partida.estado == JUGANDO)
+            ):
+                peligro_temblor = (
+                    self.peligro if self.peligro > 0.4 else max(peligro_previo, 0.48)
+                )
+                self.shake = max(
+                    self.shake,
+                    (peligro_temblor - 0.4) * 6.0 * (0.6 + 0.4 * math.sin(self.t * 18)),
+                )
+
+        if hasattr(self.app.sonidos, "actualizar_persecucion"):
+            self.app.sonidos.actualizar_persecucion(self.peligro, dt)
 
         if self.modo == "fin_espera":
             self.espera -= dt
@@ -2449,8 +2476,15 @@ class Juego(Pantalla):
                   negrita=True)
 
         if self.peligro > 0.02:
-            v = vineta(ROJO, 210)
-            v.set_alpha(int(255 * min(1.0, self.peligro * (0.65 + 0.35 * math.sin(self.t * 9)))))
+            critico = self.peligro > 0.45
+            v = vineta(ROJO, 238 if critico else 210)
+            freq_v = 16.0 if critico else 9.0
+            pulso_v = (
+                (0.72 + 0.42 * math.sin(self.t * freq_v))
+                if critico
+                else (0.65 + 0.35 * math.sin(self.t * freq_v))
+            )
+            v.set_alpha(int(255 * max(0.0, min(1.0, self.peligro * pulso_v))))
             surf.blit(v, (0, 0))
 
         if self.modo == "pausa":
