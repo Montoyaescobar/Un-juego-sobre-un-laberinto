@@ -1,49 +1,59 @@
-# Plan de Orquestación Multi-Agente: Sistema de Voces de NPCs (Doblaje en Lobby con Anti-Spam) y Corrección de Interacción SEC-08 (Auditoría del Campamento)
+# Plan de Orquestación Multi-Agente: Banda Sonora Completa, Pasos Orgánicos, Audio Dinámico de Persecución y Peligro Crítico Audiovisual
 
 **Proyecto:** *Laberinto: El Umbral de Ceniza* (`lab_v2`)  
-**Módulos Afectados:** Motor de Audio (`interfaz/efectos.py`), Pantallas e Interfaz del Campamento (`interfaz/pantallas.py`), Recursos de Audio (`lab_v2/sonidos/voces/`), y Banco de Pruebas (`pruebas/test_voces_campamento.py`).  
-**Documento de Referencia:** `AUDIT_CAMPAMENTO.md` (Hallazgo **SEC-08** y mitigación complementaria **SEC-11**).
+**Módulos Afectados:** Motor de Audio y Efectos (`interfaz/efectos.py`), Interfaz y Pantallas del Juego (`interfaz/pantallas.py`), Recursos de Audio (`lab_v2/sonidos/`), y Banco de Pruebas (`pruebas/test_audio_soundtrack.py`).  
+**Documento de Referencia:** Auditoría de Experiencia y Jugabilidad.
 
 ---
 
 ## 1. Objetivos Fundamentales del Plan
 
-1. **Integración Acústica de las Voces de los 4 NPCs en el Campamento:**
-   - Incorporar los archivos MP3 existentes en el repositorio (`vozmara.mp3`, `voztizon.mp3`, `voznela.mp3`, `vozivo.mp3`).
-   - Normalizar su localización en una estructura de recursos limpia (`lab_v2/sonidos/voces/`) manteniendo compatibilidad con la raíz para evitar errores de ruta.
-   - Vincular la reproducción de la voz correspondiente al interactuar con cada NPC (**Mara**, **Tizón**, **Nela**, **Ivo**) en el Claro de Ceniza.
+1. **Integración Integral de la Banda Sonora (Soundtrack Completo):**
+   - Incorporar y organizar las pistas musicales generadas en el repositorio:
+     * `musica_menu.mp3`: Pantalla de inicio, selección de niveles y créditos.
+     * `musica_campamento.mp3`: Claro de Ceniza (hoguera, interacción con NPCs, descanso e inventario).
+     * `musica_laberinto.mp3`: Exploración subterránea en los niveles (dark ambient, sutil y envolvente).
+     * `musica_persecucion.mp3` (o `musica_persecusion.mp3`): Pánico y huida contrarreloj.
+     * `musica_victoria.mp3`: Triunfo amargo y solemne al cruzar el Umbral con estrellas y cofres.
+     * `musica_derrota.mp3`: Game Over y muerte en la niebla.
+   - Organizar las pistas en `lab_v2/sonidos/musica/` manteniendo tolerancia de búsqueda en la raíz para evitar errores de ruta.
 
-2. **Sistema Anti-Spam Estricto (Reproducción Ininterrumpida):**
-   - Si el jugador presiona repetidamente o machaca la tecla de interacción (`E`, `Enter`, `Espacio`), **la voz del NPC NO debe reiniciarse a mitad de frase**.
-   - La frase en curso debe terminar completamente antes de que una nueva interacción pueda disparar el audio otra vez.
-   - El canal de diálogo se monitorea mediante `canal_voz.get_busy()`, ignorando reinicios concurrentes de audio mientras se mantiene el refresco visual del texto y temporizador en pantalla.
+2. **Efecto de Pasos Orgánicos Anti-Repetición (Footstep SFX):**
+   - Reemplazar el pitido sintético retro por las 4 tomas de pisadas reales (`paso1.mp3`, `paso2.mp3`, `paso3.mp3`, `paso4.mp3`).
+   - Implementar un algoritmo pseudo-aleatorio que evite la repetición inmediata del mismo sonido (*anti-machine gun effect*) al caminar tanto en el Campamento como en el Laberinto.
 
-3. **Corrección de Defecto Evidente de Jugabilidad de `AUDIT_CAMPAMENTO.md` (SEC-08):**
-   - **Problema Detectado en Auditoría:** La interacción en el campamento utilizaba una cascada lineal rígida `if-elif` con radios gigantes y desproporcionados (Hamaca 120px, Lápidas 140px, Hoguera 125px). Como la Hamaca antecedía a las Lápidas en el código, el jugador estando físicamente sobre las lápidas del cementerio recibía el texto de la hamaca (*"La hamaca está vacía..."*), imposibilitando inspeccionar el cementerio.
-   - **Solución en Jugabilidad:** Reemplazar la cascada rígida por un algoritmo de **Distancia Euclidiana Mínima** (`min(distancia)`) dentro de un radio normalizado (`RADIO_INTERACCION = 85`). El jugador siempre interactuará con el elemento al que realmente esté más cerca.
-   - **Sincronización de HUD (SEC-11):** Sincronizar el cálculo con `_objetivo_cercano()` para que la barra inferior indique contextualmente `"E  ·  EXAMINAR LÁPIDAS"`, `"E  ·  EXAMINAR HAMACA"`, `"E  ·  CONSULTAR MAPA"`, etc.
+3. **Música Adaptativa de Persecución con Atenuación Suave de Alejamiento (Fade-Out Continuo):**
+   - *Requisito Crítico:* La música de persecución **NO debe cortarse de golpe** al escapar de la Sombra o el enemigo.
+   - Se reproduce en un canal de audio independiente sobre la música del laberinto.
+   - Su volumen se modula mediante interpolación continua (*lerp*) según la distancia del jugador al peligro (`self.peligro`).
+   - Al alejarse de la sombra, el volumen desciende de forma suave y cinematográfica hasta apagarse sin sobresaltos, permitiendo que la persecución se active y desactive múltiples veces por partida con total naturalidad.
+
+4. **Efecto de Peligro Crítico en Pantalla (Visual y Temblor):**
+   - Cuando la Sombra o un enemigo en persecución BFS esté en rango crítico (`distancia <= 3` o `peligro > 0.45`):
+     * **Viñeta roja pulsante:** El borde de la pantalla se tiñe de carmesí con un pulso rítmico que simula un latido cardíaco acelerado.
+     * **Temblor de pantalla dinámico (`self.shake`):** La pantalla tiembla con intensidad directamente proporcional a la cercanía de la amenaza.
 
 ---
 
 ## 2. Topología de Agentes y Matriz de Propiedad Estricta (Zero-Conflict)
 
-Los archivos modificables están estrictamente particionados para garantizar cero solapamiento ni conflictos de merge:
+Los archivos modificables están estrictamente particionados para garantizar desarrollo paralelo con cero conflictos de merge:
 
-$$\text{Archivos}(\text{Agent-Audio-Voices}) \cap \text{Archivos}(\text{Agent-Lobby-Interaction}) \cap \text{Archivos}(\text{Agent-QA-AudioCamp}) = \emptyset$$
+$$\text{Archivos}(\text{Agent-Audio-Soundtrack}) \cap \text{Archivos}(\text{Agent-Gameplay-Audiovisual}) \cap \text{Archivos}(\text{Agent-QA-Soundtrack}) = \emptyset$$
 
 ```mermaid
 graph TD
-    subgraph "WAVE 1: Implementación Paralela (Audio + Interacción)"
-        A1["Agente 1: Agent-Audio-Voices<br/>(Carga de MP3, Canal Dedicado y Lógica Anti-Spam)"]
-        A2["Agente 2: Agent-Lobby-Interaction<br/>(Disparo de Voces, Selección por Distancia Mínima SEC-08 y HUD)"]
+    subgraph "WAVE 1: Implementación Paralela (Audio Core + Gameplay/Visuales)"
+        A1["Agente 1: Agent-Audio-Soundtrack<br/>(Organización de MP3, Gestor de Música, Pasos Orgánicos y Fader de Persecución)"]
+        A2["Agente 2: Agent-Gameplay-Audiovisual<br/>(Conexión de Música por Pantalla, Temblor Dinámico y Viñeta Roja de Peligro)"]
     end
 
     subgraph "Contratos de Interfaz Congelados (API Freeze)"
-        C1["lab_v2/interfaz/efectos.py<br/>Sonidos.reproducir_voz(npc_id) -> bool<br/>Sonidos.voz_ocupada() -> bool<br/>lab_v2/sonidos/voces/*.mp3"]
+        C1["lab_v2/interfaz/efectos.py<br/>Sonidos.reproducir_musica(pista_id, loop=True, fade_ms=1000)<br/>Sonidos.actualizar_persecucion(nivel_peligro, dt)<br/>Sonidos.reproducir_paso()<br/>Sonidos.detener_musica(fade_ms=1000)"]
     end
 
-    subgraph "WAVE 2: Verificación, Anti-Spam y Regresión"
-        A3["Agente 3: Agent-QA-AudioCamp<br/>(Tests Unitarios de Audio, Stress-Test Anti-Spam, Tests SEC-08 y Suite 244+)"]
+    subgraph "WAVE 2: Verificación, Audio Adaptativo y Regresión"
+        A3["Agente 3: Agent-QA-Soundtrack<br/>(Tests Unitarios de Audio, Modulación de Volumen, Tests de Pasos y Suite 244+)"]
     end
 
     A1 --> C1
@@ -56,63 +66,53 @@ graph TD
 
 | Agente | Identificador | Rol Especializado | Modelo Recomendado | Archivos de Escritura Exclusiva | Archivos de Solo Lectura |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Agente 1** | `Agent-Audio-Voices` | Ingeniero de Audio y Canales de Sonido. | `Claude Sonnet 5.5 (Medium)` | • `lab_v2/interfaz/efectos.py`<br>• `lab_v2/sonidos/voces/` *(carpeta y copias)* | • `lab_v2/interfaz/pantallas.py`<br>• `lab_v2/interfaz/app.py`<br>• `AUDIT_CAMPAMENTO.md` |
-| **Agente 2** | `Agent-Lobby-Interaction` | Desarrollador de Gameplay e Interfaz de Campamento. | `Claude Sonnet 5.5 (Medium)` / `Gemini 4 Argon` | • `lab_v2/interfaz/pantallas.py` | • `lab_v2/interfaz/efectos.py`<br>• `lab_v2/sonidos/voces/*`<br>• `AUDIT_CAMPAMENTO.md` |
-| **Agente 3** | `Agent-QA-AudioCamp` | Ingeniero de Pruebas de Integración y Regresión. | `Claude Sonnet 5.5 (Medium)` | • `lab_v2/pruebas/test_voces_campamento.py` *(nuevo)* | • Todos los módulos de `lab_v2/*` |
+| **Agente 1** | `Agent-Audio-Soundtrack` | Arquitecto de Audio y Música Adaptativa. | `Claude Sonnet 5.5 (Medium)` | • `lab_v2/interfaz/efectos.py`<br>• `lab_v2/sonidos/` *(organización de carpetas y archivos)* | • `lab_v2/interfaz/pantallas.py`<br>• `lab_v2/interfaz/app.py` |
+| **Agente 2** | `Agent-Gameplay-Audiovisual` | Ingeniero de Pantallas, Efectos de Peligro y Jugabilidad. | `Claude Sonnet 5.5 (Medium)` / `Gemini 4 Argon` | • `lab_v2/interfaz/pantallas.py` | • `lab_v2/interfaz/efectos.py`<br>• `lab_v2/sonidos/*` |
+| **Agente 3** | `Agent-QA-Soundtrack` | Especialista en Pruebas de Integración y Regresión. | `Claude Sonnet 5.5 (Medium)` | • `lab_v2/pruebas/test_audio_soundtrack.py` *(nuevo)* | • Todos los módulos de `lab_v2/*` |
 
 ---
 
 ## 3. Contratos de Interfaz Compartidos (API Freeze)
 
-### 3.1. Extensión de la Clase `Sonidos` (`lab_v2/interfaz/efectos.py`)
+### 3.1. Extensión de `Sonidos` (`lab_v2/interfaz/efectos.py`)
 
 ```python
 class Sonidos:
-    # Identificadores admitidos: "mara", "tizon", "nela", "ivo"
-    VOCES_MAP = {
-        "mara": ["lab_v2/sonidos/voces/mara.mp3", "vozmara.mp3"],
-        "tizon": ["lab_v2/sonidos/voces/tizon.mp3", "voztizon.mp3"],
-        "nela": ["lab_v2/sonidos/voces/nela.mp3", "voznela.mp3"],
-        "ivo": ["lab_v2/sonidos/voces/ivo.mp3", "vozivo.mp3"],
+    # Mapeo de pistas de música tolerante a nombres y rutas
+    PISTAS_MUSICA = {
+        "menu": ["lab_v2/sonidos/musica/musica_menu.mp3", "musica_menu.mp3"],
+        "campamento": ["lab_v2/sonidos/musica/musica_campamento.mp3", "musica_campamento.mp3"],
+        "laberinto": ["lab_v2/sonidos/musica/musica_laberinto.mp3", "musica_laberinto.mp3"],
+        "persecucion": ["lab_v2/sonidos/musica/musica_persecucion.mp3", "musica_persecusion.mp3", "musica_persecucion.mp3"],
+        "victoria": ["lab_v2/sonidos/musica/musica_victoria.mp3", "musica_victoria.mp3"],
+        "derrota": ["lab_v2/sonidos/musica/musica_derrota.mp3", "musica_derrota.mp3"],
     }
 
-    def reproducir_voz(self, nombre_npc: str) -> bool:
+    def reproducir_musica(self, pista_id: str, bucle: bool = True, fade_ms: int = 1200) -> bool:
+        """Reproduce la pista musical principal con fundido suave (fade-in)."""
+        ...
+
+    def detener_musica(self, fade_ms: int = 1000) -> None:
+        """Desvanece la música principal suavemente."""
+        ...
+
+    def actualizar_persecucion(self, nivel_peligro: float, dt: float) -> None:
         """
-        Reproduce el archivo de voz del NPC en un canal dedicado.
+        Modula el volumen del canal de persecución según el nivel_peligro (0.0 a 1.0).
         
-        PROTECCIÓN ANTI-SPAM:
-        - Si el canal de voz actual está reproduciendo (self.canal_voz.get_busy()),
-          RETORNA False INMEDIATAMENTE y NO reinicia el sonido a media frase.
-        - Si el canal está libre, reproduce el audio y retorna True.
-        - En caso de silencio (silenciado=True) o mixer inactivo, retorna False sin arrojar excepciones.
+        REQUISITO DE ATENUACIÓN SUAVE (EFECTO DE ALEJAMIENTO):
+        - Interpolación continua: volumen_actual += (volumen_objetivo - volumen_actual) * dt * 2.5
+        - Si nivel_peligro <= 0.05, el volumen decae hasta 0.0 y se pausa/detiene sin cortes bruscos.
+        - Si nivel_peligro > 0.15, se reproduce/reanuda en bucle suave en su canal dedicado.
         """
         ...
 
-    def voz_ocupada(self) -> bool:
-        """Retorna True si un diálogo de voz está sonando actualmente."""
+    def reproducir_paso(self) -> None:
+        """
+        Reproduce una pisada eligiendo pseudo-aleatoriamente entre paso1..paso4,
+        garantizando que nunca se repita la misma pisada dos veces seguidas.
+        """
         ...
-
-    def detener_voz(self) -> None:
-        """Fuerza la detención de la voz activa si fuera necesario (ej. cambio de pantalla)."""
-        ...
-```
-
-### 3.2. Contrato de Interacción y Prioridad en `Campamento` (`lab_v2/interfaz/pantallas.py`)
-
-```python
-# Puntos de interés del Claro de Ceniza con radio estandarizado y descripción
-PUNTOS_CAMPAMENTO = [
-    {"id": "umbral", "nombre": "E  ·  ABRIR EL UMBRAL", "radio": 135},
-    {"id": "mara", "nombre": "E  ·  HABLAR CON MARA", "radio": RADIO_INTERACCION, "voz": "mara"},
-    {"id": "ivo", "nombre": "E  ·  HABLAR CON IVO", "radio": RADIO_INTERACCION, "voz": "ivo"},
-    {"id": "nela", "nombre": "E  ·  HABLAR CON NELA", "radio": RADIO_INTERACCION, "voz": "nela"},
-    {"id": "tizon", "nombre": "E  ·  TRUEQUE CON TIZÓN", "radio": RADIO_INTERACCION, "voz": "tizon"},
-    {"id": "hamaca", "nombre": "E  ·  EXAMINAR HAMACA", "radio": 75},
-    {"id": "mapa", "nombre": "E  ·  CONSULTAR MAPA", "radio": 80},
-    {"id": "hoguera", "nombre": "E  ·  DESCANSAR EN LA HOGUERA", "radio": 80},
-    {"id": "carro", "nombre": "E  ·  INSPECCIONAR CARRO", "radio": 75},
-    {"id": "lapidas", "nombre": "E  ·  EXAMINAR LÁPIDAS", "radio": 85},
-]
 ```
 
 ---
@@ -121,149 +121,160 @@ PUNTOS_CAMPAMENTO = [
 
 ```text
 ├── WAVE 1 (Paralelo):
-│   ├── [T-01] [Agent-Audio-Voices] Gestor de Voces de NPCs y Protección Anti-Spam (efectos.py)
-│   └── [T-02] [Agent-Lobby-Interaction] Disparo de Voces y Resolución Bug SEC-08 (pantallas.py)
+│   ├── [T-01] [Agent-Audio-Soundtrack] Gestor de Bandas Sonoras, Pasos Orgánicos y Fader de Persecución (efectos.py)
+│   └── [T-02] [Agent-Gameplay-Audiovisual] Integración de Audio en Pantallas, Temblor y Viñeta Crítica (pantallas.py)
 └── WAVE 2 (Verificación):
-    └── [T-03] [Agent-QA-AudioCamp] Banco de Pruebas de Audio, Anti-Spam y Regresión Campamento (test_voces_campamento.py)
+    └── [T-03] [Agent-QA-Soundtrack] Banco de Pruebas de Audio Adaptativo, No-Repetición y Regresión (test_audio_soundtrack.py)
 ```
 
 ---
 
-### WAVE 1: Implementación Paralela (Audio + Interacción)
+### WAVE 1: Implementación Paralela (Audio Core + Gameplay/Visuales)
 
-#### `[T-01]` Gestor de Voces de NPCs y Protección Anti-Spam
-* **Agente Asignado:** `Agent-Audio-Voices`
+#### `[T-01]` Gestor de Bandas Sonoras, Pasos Orgánicos y Fader de Persecución
+* **Agente Asignado:** `Agent-Audio-Soundtrack`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)`
-* **Archivos de Escritura Exclusiva:** `lab_v2/interfaz/efectos.py`, `lab_v2/sonidos/voces/`
-* **Dependencias:** Ninguna (inicio inmediato).
+* **Archivos de Escritura Exclusiva:** `lab_v2/interfaz/efectos.py`, `lab_v2/sonidos/`
 * **Instrucciones Técnicas:**
-  1. Crear el directorio `lab_v2/sonidos/voces/` y copiar allí `vozmara.mp3 -> mara.mp3`, `voztizon.mp3 -> tizon.mp3`, `voznela.mp3 -> nela.mp3`, `vozivo.mp3 -> ivo.mp3`, manteniendo copias de respaldo o tolerando búsqueda en la raíz.
-  2. En `lab_v2/interfaz/efectos.py`:
-     - Asignar y reservar un canal específico para diálogos vocales (ej. `self.canal_voz = pygame.mixer.Channel(7)` con `set_reserved(1)`).
-     - Cargar las pistas de voz en `self.voces = {}` mediante `pygame.mixer.Sound(ruta)` con manejo seguro de excepciones (`pygame.error`, `FileNotFoundError`).
-     - Implementar `reproducir_voz(nombre_npc)` con la **regla de anti-spam estricta**:
-       ```python
-       if self.canal_voz and self.canal_voz.get_busy():
-           return False  # El NPC está hablando: NO reiniciar
-       ```
-     - Implementar `voz_ocupada()` y `detener_voz()`.
-  3. Comprobar que en entornos sin audio (`self.activo == False`) el juego continúe funcionando silenciosamente sin lanzar excepciones.
+  1. **Organización de Recursos:**
+     - Crear los directorios `lab_v2/sonidos/musica/` y `lab_v2/sonidos/sfx/`.
+     - Mover o copiar las pistas musicales correspondientes: `musica_menu.mp3`, `musica_campamento.mp3`, `musica_laberinto.mp3`, `musica_persecucion.mp3` (copiando también `musica_persecusion.mp3`), `musica_victoria.mp3`, `musica_derrota.mp3`.
+     - Mover o copiar los pasos: `paso1.mp3`, `paso2.mp3`, `paso3.mp3`, `paso4.mp3`.
+  2. **Pasos Orgánicos en `Sonidos`:**
+     - Cargar los 4 sonidos de pasos en `self.sonidos_pasos = []`.
+     - Implementar `reproducir_paso()` con lógica anti-repetición (`self._ultimo_paso`).
+     - Reemplazar la llamada a `"paso"` en `reproducir("paso")` para delegar en `reproducir_paso()`.
+  3. **Sistema de Música y Fader Dinámico de Persecución:**
+     - Implementar `reproducir_musica(pista_id, bucle=True, fade_ms=1200)` usando `pygame.mixer.music`.
+     - Reservar un canal de audio dedicado para la persecución (`self.canal_persecucion = pygame.mixer.Channel(6)`).
+     - Cargar `musica_persecucion.mp3` como `pygame.mixer.Sound` para ese canal.
+     - Implementar `actualizar_persecucion(nivel_peligro, dt)`:
+       * Calcular el `volumen_objetivo = min(1.0, max(0.0, (nivel_peligro - 0.15) / 0.85))`.
+       * Interpolar suavemente el volumen actual hacia el objetivo con una constante de tiempo proporcional a `dt * 2.2`.
+       * Si el volumen desciende de 0.01, silenciar completamente el canal sin detener bruscamente la posición para reanudar limpio si la sombra vuelve a acercarse.
 
-#### `[T-02]` Disparo de Voces y Resolución Bug SEC-08 (Auditoría del Campamento)
-* **Agente Asignado:** `Agent-Lobby-Interaction`
+#### `[T-02]` Integración de Audio en Pantallas, Temblor y Viñeta Crítica
+* **Agente Asignado:** `Agent-Gameplay-Audiovisual`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)` / `Gemini 4 Argon`
 * **Archivos de Escritura Exclusiva:** `lab_v2/interfaz/pantallas.py`
-* **Dependencias:** Inicio en paralelo (respeta el contrato de `Sonidos.reproducir_voz`).
 * **Instrucciones Técnicas:**
-  1. **Solución del Bug SEC-08 (Enmascaramiento de Interacciones):**
-     - En `Campamento._interactuar()`, eliminar la cascada `if-elif` rígida y con radios sobredimensionados.
-     - Implementar la selección del objetivo por **distancia euclidiana mínima** calculando la distancia del personaje a cada punto de interés y escogiendo el más cercano dentro de su radio válido (`min(candidatos_en_rango, key=distancia)`).
-     - Ajustar las coordenadas y radios para que las Lápidas (`166, 290`) ya no sean absorbidas por la Hamaca (`266, 356`).
-  2. **Integración de Voces de NPCs:**
-     - Al interactuar con Mara: activar diálogo y llamar `self.app.sonidos.reproducir_voz("mara")`.
-     - Al interactuar con Ivo: activar diálogo y llamar `self.app.sonidos.reproducir_voz("ivo")`.
-     - Al interactuar con Nela: activar diálogo y llamar `self.app.sonidos.reproducir_voz("nela")`.
-     - Al interactuar con Tizón: activar diálogo y llamar `self.app.sonidos.reproducir_voz("tizon")`.
-  3. **Sincronización del HUD Contextual (SEC-11):**
-     - Actualizar `_objetivo_cercano()` para que incluya todos los puntos interactivos del campamento (Lápidas, Carro, Hamaca, Mapa, Hoguera), mostrando en la barra inferior `"E · EXAMINAR LÁPIDAS"`, etc.
+  1. **Vinculación de Música por Pantalla:**
+     - En `Menu.__init__` y `Niveles`: activar `self.app.sonidos.reproducir_musica("menu")`.
+     - En `Campamento.__init__`: activar `self.app.sonidos.reproducir_musica("campamento")`.
+     - En `Juego.__init__`: activar `self.app.sonidos.reproducir_musica("laberinto")`.
+     - Al ganar la partida (`self.partida.estado == GANO`): reproducir `musica_victoria`.
+     - Al perder la partida (`self.partida.estado in (SIN_MOVIMIENTOS, ATRAPADO)`): reproducir `musica_derrota`.
+  2. **Efecto de Alejamiento y Audio Dinámico de Persecución:**
+     - En `Juego.actualizar(dt)`:
+       * Llamar en cada cuadro a `self.app.sonidos.actualizar_persecucion(self.peligro, dt)`.
+  3. **Peligro Crítico Audiovisual (Temblor y Viñeta):**
+     - En `Juego.actualizar(dt)`:
+       * Si `self.peligro > 0.45` o `cerca_persecucion <= 3`:
+         * Inyectar temblor de pantalla continuo:
+           `temblor_peligro = (self.peligro - 0.4) * 5.5 * (0.6 + 0.4 * math.sin(self.t * 18))`
+           `self.shake = max(self.shake, temblor_peligro)`
+     - En `Juego.dibujar(surf)`:
+       * Reforzar la viñeta roja pulsante cuando `self.peligro > 0.10`, añadiendo un borde de viñeta carmesí profundo más marcado cuando el peligro supera 0.60.
 
 ---
 
-### WAVE 2: Verificación, Anti-Spam y Regresión
+### WAVE 2: Verificación, Audio Adaptativo y Regresión
 
-#### `[T-03]` Banco de Pruebas de Audio, Anti-Spam y Regresión Campamento
-* **Agente Asignado:** `Agent-QA-AudioCamp`
+#### `[T-03]` Banco de Pruebas de Audio Adaptativo, No-Repetición y Regresión
+* **Agente Asignado:** `Agent-QA-Soundtrack`
 * **Modelo Recomendado:** `Claude Sonnet 5.5 (Medium)`
-* **Archivos de Escritura Exclusiva:** `lab_v2/pruebas/test_voces_campamento.py`
-* **Dependencias:** `[T-01]`, `[T-02]`
+* **Archivos de Escritura Exclusiva:** `lab_v2/pruebas/test_audio_soundtrack.py`
 * **Instrucciones Técnicas:**
-  1. Crear `lab_v2/pruebas/test_voces_campamento.py` con pruebas unitarias y de integración:
-     - `test_carga_archivos_voces`: Verificar que los 4 archivos de audio existen y son cargados correctamente por `Sonidos`.
-     - `test_antispam_canal_ocupado`: Simular 10 pulsaciones rápidas consecutivas sobre Mara y verificar que `reproducir_voz` solo ejecuta una vez y rechaza los reinicios mientras el canal esté ocupado (`busy`).
-     - `test_resolucion_sec08_lapidas_vs_hamaca`: Situar al jugador en `(180, 300)` (junto a las lápidas) y comprobar que la interacción seleccionada son las Lápidas y NO la Hamaca.
-     - `test_hud_contextual_objetos`: Verificar que `_objetivo_cercano()` devuelve el texto correcto para cada objeto.
-  2. Ejecutar la suite completa del proyecto (`python -m unittest discover -s lab_v2/pruebas`) asegurando que los 244 tests previos más los nuevos pasen con resultado exitoso (0 fallos, 0 errores).
+  1. Crear `lab_v2/pruebas/test_audio_soundtrack.py`:
+     - `test_carga_pistas_musica`: Validar que todas las pistas (`menu`, `campamento`, `laberinto`, `persecucion`, `victoria`, `derrota`) se localizan correctamente.
+     - `test_antirepeticion_pasos`: Simular 50 pasos consecutivos y verificar que nunca hay dos pasos con el mismo índice seguidos (`paso_i != paso_{i+1}`).
+     - `test_fader_persecucion_atenuacion_suave`: Verificar que ante una caída brusca de peligro de 1.0 a 0.0, el volumen no cae a 0 instantáneamente sino que desciende gradualmente por *lerp*.
+     - `test_musica_pantallas_transicion`: Validar que las pantallas solicitan la pista musical correcta.
+  2. Ejecutar la suite completa (`$env:PYTHONPATH="lab_v2"; python -m unittest discover -s lab_v2/pruebas`) asegurando que los 244 tests previos más los nuevos pasen con 0 errores y 0 fallos.
 
 ---
 
 ## 5. Asignación de Agentes, Modelos y Prompts de Ejecución
 
 ### Resumen de Recursos Necesarios
-* **Total de Agentes Requeridos:** 3 agentes en 2 oleadas (Wave 1: 2 agentes paralelos; Wave 2: 1 agente de control de calidad).
+* **Total de Agentes:** 3 agentes en 2 oleadas (Wave 1: 2 agentes paralelos; Wave 2: 1 agente de control de calidad).
 * **Modelos Aptos:**
-  - `Claude Sonnet 5.5 (Medium)` para lógica de canales de audio, anti-spam y suite de tests.
-  - `Claude Sonnet 5.5` o `Gemini 4 Argon` para interfaz de campamento y matemáticas de proximidad espacial.
+  - `Claude Sonnet 5.5 (Medium)` para la lógica de canales de audio, modulación de volumen, anti-repetición y tests.
+  - `Claude Sonnet 5.5 (Medium)` o `Gemini 4 Argon` para pantallas de juego, viñetas y temblor de cámara.
 
 ---
 
-### 📋 PROMPT LISTO PARA AGENTE 1 (`Agent-Audio-Voices`)
+### 📋 PROMPT LISTO PARA AGENTE 1 (`Agent-Audio-Soundtrack`)
 ```text
-Rol: Agent-Audio-Voices (Ingeniero de Audio y Canales de Sonido)
+Rol: Agent-Audio-Soundtrack (Arquitecto de Audio y Música Adaptativa)
 Modelo Recomendado: Claude Sonnet 5.5 (Medium)
 Archivos de Escritura Exclusiva:
 - lab_v2/interfaz/efectos.py
-- lab_v2/sonidos/voces/ (crear carpeta y copiar archivos mp3)
+- lab_v2/sonidos/ (organizar carpetas y recursos)
 Archivos de Solo Lectura:
 - lab_v2/interfaz/pantallas.py
-- AUDIT_CAMPAMENTO.md
+- lab_v2/interfaz/app.py
 
-Tu misión es implementar la carga de voces y el sistema de reproducción con protección anti-spam en lab_v2:
-1. En la raíz del proyecto existen 4 archivos: vozmara.mp3, voztizon.mp3, voznela.mp3 y vozivo.mp3.
-   Crea el directorio lab_v2/sonidos/voces/ y copia allí los archivos renombrándolos a mara.mp3, tizon.mp3, nela.mp3 e ivo.mp3 (mantén compatibilidad para buscar tanto en esa ruta como en la raíz).
+Tu misión es implementar el gestor de música de fondo, pasos orgánicos y fader de persecución en lab_v2:
+1. En la raíz existen: musica_menu.mp3, musica_campamento.mp3, musica_laberinto.mp3, musica_persecusion.mp3, musica_victoria.mp3, musica_derrota.mp3, y paso1.mp3..paso4.mp3.
+   Crea lab_v2/sonidos/musica/ y lab_v2/sonidos/sfx/ y copia/organiza estos archivos (asegura compatibilidad para encontrar musica_persecucion o musica_persecusion indistintamente).
 2. En lab_v2/interfaz/efectos.py extiende la clase Sonidos:
-   - Configura un canal de audio reservado para voces de personajes (self.canal_voz = pygame.mixer.Channel(7) o similar, con pygame.mixer.set_reserved(1)).
-   - Carga las voces en un diccionario self.voces con control seguro de excepciones.
-   - Implementa reproducir_voz(nombre_npc):
-     * REQUISITO CLAVE ANTI-SPAM: Si self.canal_voz.get_busy() es True, RETORNA False y NO REINICIES el sonido a media frase. Deja que el diálogo actual termine de hablar por completo.
-     * Si no está ocupado, reproduce la voz y retorna True.
-   - Implementa voz_ocupada() -> bool y detener_voz() -> None.
-   - Asegura degradación suave: si el mixer no inicializa (modo headless o sin audio), no arrojes errores.
-3. No toques archivos fuera de tu titularidad. Al terminar, notifica el freeze de la API.
+   - Carga los 4 pasos en self.sonidos_pasos. Implementa reproducir_paso(): debe seleccionar aleatoriamente entre los 4 sin repetir nunca el mismo paso dos veces seguidas. Haz que self.reproducir("paso") invoque este método.
+   - Implementa reproducir_musica(pista_id, bucle=True, fade_ms=1200) y detener_musica(fade_ms=1000) usando pygame.mixer.music de forma robusta y con manejo de excepciones (modo sin audio).
+   - Implementa el audio de persecución adaptativo:
+     * Reserva un canal para persecución (ej. self.canal_persecucion = pygame.mixer.Channel(6)).
+     * Carga la pista de persecución como Sound.
+     * Implementa actualizar_persecucion(nivel_peligro, dt): modula el volumen del canal usando interpolación continua (lerp) hacia el objetivo. Al alejarse de la sombra/enemigo (peligro cayendo), el volumen debe desvanecerse suavemente hasta 0 sin cortes bruscos.
+3. Respeta tu titularidad de archivos exclusiva y notifica el freeze de la API al terminar.
 ```
 
 ---
 
-### 📋 PROMPT LISTO PARA AGENTE 2 (`Agent-Lobby-Interaction`)
+### 📋 PROMPT LISTO PARA AGENTE 2 (`Agent-Gameplay-Audiovisual`)
 ```text
-Rol: Agent-Lobby-Interaction (Desarrollador de Gameplay e Interfaz de Campamento)
+Rol: Agent-Gameplay-Audiovisual (Ingeniero de Pantallas, Efectos de Peligro y Jugabilidad)
 Modelo Recomendado: Claude Sonnet 5.5 (Medium) / Gemini 4 Argon
 Archivos de Escritura Exclusiva:
 - lab_v2/interfaz/pantallas.py
 Archivos de Solo Lectura:
 - lab_v2/interfaz/efectos.py
-- AUDIT_CAMPAMENTO.md
+- lab_v2/sonidos/*
 
-Tu misión es integrar la reproducción de voces en el Claro de Ceniza y corregir el bug de jugabilidad SEC-08 de AUDIT_CAMPAMENTO.md:
-1. Corrección del Bug SEC-08 (Enmascaramiento de interacción):
-   - En la clase Campamento, reemplaza la cascada lineal rígida if-elif de _interactuar() por una selección basada en distancia euclidiana mínima (min(candidatos_en_rango, key=lambda c: c['distancia'])).
-   - Corrige las colisiones de radios (especialmente Hamaca vs Lápidas): un jugador junto a las lápidas (166, 290) debe examinar las lápidas y no la hamaca.
-   - Normaliza los radios de interacción a valores razonables (85px para NPCs y lápidas, 75-80px para hamaca, carro, mapa y hoguera).
-2. Integración de Voces de NPCs:
-   - Al interactuar con Mara, Ivo, Nela o Tizón, además de mostrar el texto y mensaje_tiempo, llama a self.app.sonidos.reproducir_voz(nombre_npc).
-   - Recuerda que reproducir_voz cuenta con protección anti-spam, por lo que puedes llamarlo en cada interacción de forma segura.
-3. Indicadores de HUD Contextual (SEC-11):
-   - Actualiza _objetivo_cercano() para que devuelva la etiqueta contextual correspondiente para TODOS los objetos interactivos (Lápidas, Carro, Hamaca, Hoguera, Mapa, además de los NPCs y el Umbral).
-4. Respeta tu titularidad de archivos exclusiva (solo lab_v2/interfaz/pantallas.py).
+Tu misión es conectar la música en cada pantalla del juego e implementar el temblor y viñeta roja de peligro crítico:
+1. Conexión de Música por Pantalla:
+   - En Menu y Niveles: llamar a self.app.sonidos.reproducir_musica("menu") si no está sonando ya.
+   - En Campamento: reproducir_musica("campamento").
+   - En Juego: reproducir_musica("laberinto").
+   - Al finalizar partida: reproducir_musica("victoria") si ganó, o reproducir_musica("derrota") si perdió/atrapado.
+2. Audio Dinámico de Persecución (Efecto de Alejamiento):
+   - En Juego.actualizar(dt): invocar self.app.sonidos.actualizar_persecucion(self.peligro, dt) en cada cuadro para que el volumen responda a la distancia con la sombra/enemigo.
+3. Peligro Crítico en Pantalla (Temblor y Viñeta Roja):
+   - Cuando self.peligro > 0.45 o cerca_persecucion <= 3:
+     * Inyectar temblor continuo en self.shake: self.shake = max(self.shake, (self.peligro - 0.4) * 6.0 * (0.6 + 0.4 * math.sin(self.t * 18))).
+   - En Juego.dibujar(surf): asegurar que la viñeta roja pulse intensamente al ritmo de tensión cuando el peligro sea elevado.
+4. Pasos en movimiento:
+   - Asegúrate de que las pisadas tanto en Campamento como en Juego usen self.app.sonidos.reproducir("paso") (que ahora dispara pasos orgánicos anti-repetición).
+5. Respeta tu titularidad de archivos exclusiva (solo lab_v2/interfaz/pantallas.py).
 ```
 
 ---
 
-### 📋 PROMPT LISTO PARA AGENTE 3 (`Agent-QA-AudioCamp`)
+### 📋 PROMPT LISTO PARA AGENTE 3 (`Agent-QA-Soundtrack`)
 ```text
-Rol: Agent-QA-AudioCamp (Ingeniero de Pruebas de Integración y Regresión)
+Rol: Agent-QA-Soundtrack (Especialista en Pruebas de Integración y Regresión)
 Modelo Recomendado: Claude Sonnet 5.5 (Medium)
 Archivos de Escritura Exclusiva:
-- lab_v2/pruebas/test_voces_campamento.py
+- lab_v2/pruebas/test_audio_soundtrack.py
 Archivos de Solo Lectura:
 - Todos los módulos de lab_v2/*
 
-Tu misión es verificar formalmente la integración de voces, la protección anti-spam y la corrección SEC-08:
-1. Crea lab_v2/pruebas/test_voces_campamento.py:
-   - test_carga_voces_existentes: Verifica que las 4 voces (mara, tizon, nela, ivo) son localizadas y cargadas.
-   - test_proteccion_antispam_voces: Comprueba con un mock o canal que si canal.get_busy() es True, reproducir_voz rechaza la invocación sin reiniciar la pista.
-   - test_correccion_sec08_lapidas_prioridad: Coloca al personaje junto al cementerio y valida que _interactuar() selecciona las lápidas y no la hamaca.
-   - test_hud_contextual_completo: Valida que _objetivo_cercano() reconoce lápidas, carro, hoguera, etc.
-2. Ejecuta la suite completa de pruebas:
-   python -m unittest discover -s lab_v2/pruebas
-   Verifica que los 244 tests de regresión previos más los nuevos pasen con 0 errores y 0 fallos.
+Tu misión es validar formalmente la banda sonora, los pasos orgánicos y el peligro crítico:
+1. Crea lab_v2/pruebas/test_audio_soundtrack.py con pruebas unitarias y de integración:
+   - test_localizacion_archivos_audio: Verifica que las 6 pistas musicales y los 4 pasos existen y son detectados.
+   - test_antirepeticion_pasos: Simula 40 llamadas seguidas a reproducir_paso() y valida que dos pasos idénticos nunca se ejecuten consecutivamente.
+   - test_fader_persecucion_atenuacion_suave: Valida que actualizar_persecucion modula el volumen por interpolación y que ante peligro=0.0 el volumen se reduce suavemente sin cortes.
+   - test_invocacion_musica_pantallas: Valida que las pantallas solicitan las pistas correctas (menu, campamento, laberinto, victoria, derrota).
+2. Ejecuta la suite de pruebas completa:
+   $env:PYTHONPATH="lab_v2"; python -m unittest discover -s lab_v2/pruebas
+   Verifica que los 244 tests previos más los nuevos pasen con 0 errores y 0 fallos.
 ```
