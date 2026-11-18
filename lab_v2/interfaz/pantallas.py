@@ -43,6 +43,27 @@ from interfaz.render import (tablero_estatico, dibujar_portal, dibujar_jugador, 
                              dibujar_cadena, dibujar_esqueleto, dibujar_espada_verde, dibujar_rueda,
                              dibujar_eco, dibujar_radar, dibujar_estrella, dibujar_cofre,
                              dibujar_icono_item, dibujar_ranura_item, COLORES_RAREZA, Linterna)
+try:
+    from interfaz.render import dibujar_ataque_arma
+except ImportError:
+    def dibujar_ataque_arma(surf, cx, cy, cell, t, direccion, progreso, arma_id="espada_ceniza"):
+        """Fallback a dibujar_espada_verde cuando render.py aún no expone dibujar_ataque_arma."""
+        return dibujar_espada_verde(surf, cx, cy, cell, t, direccion, progreso)
+
+
+def _dibujar_jugador_con_arma(surf, cx, cy, cell, t, antorcha=True, direccion="abajo",
+                              andando=False, saltando=False, arma="espada_ceniza"):
+    """Invoca dibujar_jugador pasando arma, con fallback limpio si la firma aún no la acepta."""
+    try:
+        return dibujar_jugador(
+            surf, cx, cy, cell, t, antorcha=antorcha, direccion=direccion,
+            andando=andando, saltando=saltando, arma=arma
+        )
+    except TypeError:
+        return dibujar_jugador(
+            surf, cx, cy, cell, t, antorcha=antorcha, direccion=direccion,
+            andando=andando, saltando=saltando
+        )
 from interfaz.tema import (ANCHO, ALTO, PANEL, BORDE, CIAN, ORO, ROJO, VERDE, MORADO,
                            TEXTO, APAGADO, OSCURIDAD_POR_BRILLO, NOMBRES_BRILLO, NOMBRES_EFECTOS,
                            paleta_de, fuente, texto, texto_ajustado, panel, brillo, mezclar, vineta)
@@ -652,6 +673,7 @@ class Campamento(Pantalla):
     def __init__(self, app, posicion=None):
         """Prepara el refugio: personaje, árboles, bloqueos de colisión, armaduras y duende. Recibe: app y posicion inicial (opcional; si no, el punto guardado). Devuelve: nada (constructor)."""
         super().__init__(app)
+        self.inventario = _obtener_inventario(app)
         self.personaje = list(posicion or app.punto_guardado or (542.0, 590.0))
         self.teclas = set()
         self.direccion = "abajo"
@@ -754,6 +776,13 @@ class Campamento(Pantalla):
                     self.controlador.limpiar_teclas()
                 self.app.sonidos.reproducir("clic")
                 self.app.ir_a(PantallaInventario(self.app, lambda: self))
+                return
+            elif e.key == pygame.K_c:
+                self.teclas.clear()
+                if hasattr(self, "controlador"):
+                    self.controlador.limpiar_teclas()
+                self.app.sonidos.reproducir("clic")
+                self.app.ir_a(PantallaCodiceGuia(self.app, lambda: self))
                 return
         if e.type == pygame.KEYDOWN and e.key in MOVIMIENTOS:
             self.teclas.add(e.key)
@@ -1213,6 +1242,21 @@ class Campamento(Pantalla):
         self.ambiente.dibujar_chispas(surf)
         self.ambiente.dibujar_humo(surf)
         # Y-Sorting unificado (SEC-14): viajero, NPCs y armaduras ordenados por su Y.
+        _obtener_inventario(self.app)
+        arma_activa = getattr(self.app.inventario, "arma_equipada", "espada_ceniza")
+
+        def _dibujar_viajero_campamento():
+            try:
+                dibujar_jugador(
+                    surf, self.personaje[0], self.personaje[1], 48, self.t,
+                    self.antorcha, self.direccion, self.andando, arma=arma_activa
+                )
+            except TypeError:
+                dibujar_jugador(
+                    surf, self.personaje[0], self.personaje[1], 48, self.t,
+                    self.antorcha, self.direccion, self.andando
+                )
+
         entidades = [
             {"y": self.pos_mara[1], "dibujar": lambda: self._dibujar_sobreviviente(
                 surf, self.pos_mara[0], self.pos_mara[1], "MARA · CARTÓGRAFA", (134, 112, 65))},
@@ -1221,9 +1265,7 @@ class Campamento(Pantalla):
             {"y": self.pos_nela[1], "dibujar": lambda: self._dibujar_sobreviviente(
                 surf, self.pos_nela[0], self.pos_nela[1], "NELA · CURANDERA", (132, 72, 52))},
             {"y": self.duende[1], "dibujar": lambda: self._dibujar_duende(surf)},
-            {"y": self.personaje[1], "dibujar": lambda: dibujar_jugador(
-                surf, self.personaje[0], self.personaje[1], 48, self.t,
-                self.antorcha, self.direccion, self.andando)},
+            {"y": self.personaje[1], "dibujar": _dibujar_viajero_campamento},
         ]
         for armadura in self.armaduras:
             entidades.append({"y": armadura["y"],
@@ -1435,14 +1477,22 @@ class Juego(Pantalla):
         self.guardado = None             # None = sin decidir, número = puesto, 0 = omitido
         self.peligro = 0.0
 
-        x, w, h = 800, 260, 38
-        self.b_pista = Boton("Pista  (−%d mov.)" % COSTO_PISTA, (x, 320, w, h), self.pedir_pista,
-                             "H", ORO, 19)
-        self.b_deshacer = Boton("Deshacer", (x, 364, w, h), self.deshacer, "U", CIAN, 19)
-        self.b_luz = Boton("Antorcha", (x, 408, w, h), self.alternar_luz, "L", MORADO, 19)
-        self.b_inventario = Boton("Códice / Inventario", (x, 452, w, h), self.abrir_inventario, "I", ORO, 19)
-        self.b_pausa = Boton("Pausa", (x, 496, w, h), self.pausar, "Esc", APAGADO, 19)
-        self.botones_hud = [self.b_pista, self.b_deshacer, self.b_luz, self.b_inventario, self.b_pausa]
+        x, w, h = 800, 260, 30
+        self.b_pista = Boton("Pista  (−%d mov.)" % COSTO_PISTA, (x, 332, w, h), self.pedir_pista,
+                             "H", ORO, 17)
+        self.b_deshacer = Boton("Deshacer", (x, 366, w, h), self.deshacer, "U", CIAN, 17)
+        self.b_luz = Boton("Antorcha", (x, 400, w, h), self.alternar_luz, "L", MORADO, 17)
+        self.b_inventario = Boton("Inventario", (x, 434, w, h), self.abrir_inventario, "I", ORO, 17)
+        self.b_codice = Boton("Códice", (x, 468, w, h), self.abrir_codice, "C", CIAN, 17)
+        self.b_pausa = Boton("Pausa", (x, 502, w, h), self.pausar, "Esc", APAGADO, 17)
+        self.botones_hud = [
+            self.b_pista,
+            self.b_deshacer,
+            self.b_luz,
+            self.b_inventario,
+            self.b_codice,
+            self.b_pausa,
+        ]
         self.botones_pausa = []
         self.botones_fin = []
         self._armar_pausa()
@@ -2035,16 +2085,24 @@ class Juego(Pantalla):
         self.app.sonidos.reproducir("clic")
         self.app.ir_a(PantallaInventario(self.app, lambda: self))
 
+    def abrir_codice(self):
+        """Abre la guía enciclopédica del Códice de Mecánicas del Laberinto."""
+        if self.modo not in ("jugando", "pausa"):
+            return
+        self.app.sonidos.reproducir("clic")
+        self.app.ir_a(PantallaCodiceGuia(self.app, lambda: self))
+
     def _armar_pausa(self):
         """(Interno) Crea los botones del menú de pausa."""
         cx = ANCHO // 2
         self.botones_pausa = [
-            Boton("Continuar", (cx - 160, 266, 320, 48), self._continuar, "Esc", CIAN, 22),
-            Boton("Inventario y Códice", (cx - 160, 324, 320, 48), self.abrir_inventario, "I", ORO, 22),
-            Boton("Reiniciar nivel", (cx - 160, 382, 320, 48), self._reiniciar, "", MORADO, 22),
-            Boton("Volver al campamento", (cx - 160, 440, 320, 48),
+            Boton("Continuar", (cx - 160, 250, 320, 44), self._continuar, "Esc", CIAN, 20),
+            Boton("Inventario", (cx - 160, 302, 320, 44), self.abrir_inventario, "I", ORO, 20),
+            Boton("Códice de Mecánicas", (cx - 160, 354, 320, 44), self.abrir_codice, "C", CIAN, 20),
+            Boton("Reiniciar nivel", (cx - 160, 406, 320, 44), self._reiniciar, "", MORADO, 20),
+            Boton("Volver al campamento", (cx - 160, 458, 320, 44),
                   lambda: self.app.ir_a(Campamento(self.app)),
-                  "", ROJO, 22),
+                  "", ROJO, 20),
         ]
 
     def _continuar(self):
@@ -2133,15 +2191,21 @@ class Juego(Pantalla):
                 elif e.key in (pygame.K_f, pygame.K_x):
                     self.atacar()
                 elif e.key in (pygame.K_i, pygame.K_TAB):
-                    self.app.sonidos.reproducir("clic")
-                    self.app.ir_a(PantallaInventario(self.app, lambda: self))
+                    self.abrir_inventario()
+                elif e.key == pygame.K_c:
+                    self.abrir_codice()
                 elif e.key in (pygame.K_ESCAPE, pygame.K_p):
                     self.pausar()
         elif self.modo == "pausa":
             if self._clics(e, self.botones_pausa):
                 return
-            if e.type == pygame.KEYDOWN and e.key in (pygame.K_ESCAPE, pygame.K_p):
-                self._continuar()
+            if e.type == pygame.KEYDOWN:
+                if e.key in (pygame.K_ESCAPE, pygame.K_p):
+                    self._continuar()
+                elif e.key in (pygame.K_i, pygame.K_TAB):
+                    self.abrir_inventario()
+                elif e.key == pygame.K_c:
+                    self.abrir_codice()
         elif self.modo == "nombre":
             if self._clics(e, self.botones_fin):
                 return
@@ -2207,6 +2271,7 @@ class Juego(Pantalla):
         self.b_pausa.habilitado = self.modo == "jugando" and \
             self.trampa["estado"] != "activa" and not rueda_activa
         self.b_inventario.habilitado = self.modo == "jugando"
+        self.b_codice.habilitado = self.modo == "jugando"
         self.b_luz.etiqueta = "Antorcha: " + ("abierta" if self.linterna_on else "cubierta")
 
         if self.modo == "jugando" and self.trampa["estado"] == "activa":
@@ -2474,13 +2539,24 @@ class Juego(Pantalla):
                                 (int(jx - self.cell * 0.22), int(jy + self.cell * 0.18),
                                  int(self.cell * 0.44), max(2, int(self.cell * 0.13))))
             jy -= elevacion
-        dibujar_jugador(surf, jx, jy, self.cell, self.t, antorcha=self.linterna_on,
-                        direccion=self.direccion, andando=self.andando,
-                        saltando=self.salto_animacion > 0)
+        _obtener_inventario(self.app)
+        arma_activa = getattr(self.app.inventario, "arma_equipada", "espada_ceniza")
+        try:
+            dibujar_jugador(surf, jx, jy, self.cell, self.t, antorcha=self.linterna_on,
+                            direccion=self.direccion, andando=self.andando,
+                            saltando=self.salto_animacion > 0, arma=arma_activa)
+        except TypeError:
+            dibujar_jugador(surf, jx, jy, self.cell, self.t, antorcha=self.linterna_on,
+                            direccion=self.direccion, andando=self.andando,
+                            saltando=self.salto_animacion > 0)
         if self.ataque_animacion > 0:
             progreso_ataque = 1 - self.ataque_animacion / 0.28
-            dibujar_espada_verde(surf, jx, jy, self.cell, self.t, self.direccion,
-                                 progreso_ataque)
+            try:
+                dibujar_ataque_arma(surf, jx, jy, self.cell, self.t, self.direccion,
+                                    progreso_ataque, arma_id=arma_activa)
+            except TypeError:
+                dibujar_ataque_arma(surf, jx, jy, self.cell, self.t, self.direccion,
+                                    progreso_ataque)
 
         self.ambiente.dibujar_polvo(surf)
         luces = [(sx - self.origen[0], sy - self.origen[1])]
@@ -2537,8 +2613,8 @@ class Juego(Pantalla):
 
         if self.modo == "pausa":
             self._velo(surf, 170)
-            panel(surf, pygame.Rect(ANCHO // 2 - 220, 190, 440, 320), 240)
-            texto(surf, "PAUSA", 52, TEXTO, (ANCHO // 2, 214), "midtop", negrita=True)
+            panel(surf, pygame.Rect(ANCHO // 2 - 220, 174, 440, 356), 240)
+            texto(surf, "PAUSA", 48, TEXTO, (ANCHO // 2, 192), "midtop", negrita=True)
             for b in self.botones_pausa:
                 b.dibujar(surf)
         elif self.modo in ("nombre", "opciones"):
@@ -2609,7 +2685,7 @@ class Juego(Pantalla):
         estrellas_rec = min(3, max(0, int(getattr(p, "estrellas_recogidas", 0))))
         cadena_estrellas = " ".join("★" if k < estrellas_rec else "☆" for k in range(3))
         texto(surf, cadena_estrellas, 22, ORO, (1060, 42), "topright", negrita=True)
-        texto(surf, "I / Tab · Códice", 12, CIAN, (1060, 76), "topright", sombra=False)
+        texto(surf, "I · Inv.  |  C · Códice", 12, CIAN, (1060, 76), "topright", sombra=False)
 
         # Barra de movimientos: con marcas cada 10 % y un borde que late cuando quedan pocos
         texto(surf, "MOVIMIENTOS", 15, APAGADO, (800, 108), sombra=False, negrita=True)
@@ -3513,8 +3589,13 @@ class PantallaInventario(Pantalla):
         pygame.draw.rect(surf, (14, 16, 13), pedestal, border_radius=8)
         pygame.draw.rect(surf, (78, 72, 48), pedestal, 2, border_radius=8)
         brillo(surf, pedestal.center, 76, ORO, 0.22 + 0.05 * math.sin(self.t * 3.0))
-        dibujar_jugador(surf, pedestal.centerx, pedestal.centery + 18, 92, self.t,
-                        antorcha=True, direccion="abajo", andando=False)
+        arma_inv = getattr(self.inventario, "arma_equipada", "espada_ceniza")
+        try:
+            dibujar_jugador(surf, pedestal.centerx, pedestal.centery + 18, 92, self.t,
+                            antorcha=True, direccion="abajo", andando=False, arma=arma_inv)
+        except TypeError:
+            dibujar_jugador(surf, pedestal.centerx, pedestal.centery + 18, 92, self.t,
+                            antorcha=True, direccion="abajo", andando=False)
 
         oro_total = getattr(self.inventario, "oro", 0)
         texto(surf, "Oro acumulado: %d" % oro_total, 14, ORO,
@@ -3653,4 +3734,562 @@ class PantallaInventario(Pantalla):
         if linea:
             texto(surf, linea, tam, color, (pos[0], y), sombra=False)
         return y + tam + 8
+
+
+# =====================================================================================
+#  CÓDICE DE MECÁNICAS Y PELIGROS DEL LABERINTO (GUÍA INTERACTIVA)
+# =====================================================================================
+ENTRADAS_CODICE_GUIA = [
+    # --- CATEGORÍA: TRAMPAS (5 obligatorias) ---
+    {
+        "id": "placas_tiza",
+        "categoria": "Trampas",
+        "nombre": "Placas de Tiza",
+        "subtitulo": "Trampa de presión con cuenta regresiva (2.0 s)",
+        "icono": "placa_tiza",
+        "color": ORO,
+        "descripcion": (
+            "Losa oculta en ramales secundarios que custodia un Fragmento de Mapa. "
+            "Al pisarla despierta el mecanismo de cierre y bloquea el avance: dispones "
+            "de 2.0 segundos para retroceder hasta la marca circular de tiza antes de quedar atrapado."
+        ),
+        "consejos": [
+            "Localiza siempre el círculo de tiza en el suelo antes de pisar la placa.",
+            "En cuanto suene el temblor, retrocede sin dudar por el mismo ramal hasta la marca.",
+            "Una vez desarmada en la marca de tiza, la placa queda inerte y puedes recoger la reliquia.",
+        ],
+    },
+    {
+        "id": "rotor",
+        "categoria": "Trampas",
+        "nombre": "Rotor de Cuchillas",
+        "subtitulo": "Mecanismo giratorio de sincronización y salto",
+        "icono": "rotor",
+        "color": VERDE,
+        "descripcion": (
+            "Eje mecánico empotrado en el piso cuyas tres aspas afiladas barren el corredor "
+            "continuamente. Su núcleo cambia de color rojo a verde cuando las cuchillas se alinean "
+            "en vertical y abren una ventana de paso."
+        ),
+        "consejos": [
+            "Detente en la casilla previa y observa el ritmo del destello central.",
+            "Cuando el núcleo y el cartel indiquen GIRO VERDE, pulsa Espacio y avanza de inmediato.",
+            "Entrar sin saltar o cuando el rotor brilla en rojo causa derrota instantánea.",
+        ],
+    },
+    {
+        "id": "pendulo",
+        "categoria": "Trampas",
+        "nombre": "Péndulo con Cadena",
+        "subtitulo": "Peso oscilante suspendido sobre cuchillas",
+        "icono": "pendulo",
+        "color": CIAN,
+        "descripcion": (
+            "Pesada maza de hierro sujeta al techo por una cadena que oscila de lado a lado "
+            "sobre un foso de púas. Combina el peligro aéreo del péndulo con las cuchillas del suelo."
+        ),
+        "consejos": [
+            "Espera a que el péndulo se retire hacia los extremos (el peso se ilumina en tono verdoso).",
+            "Combina la ventana segura del péndulo con Espacio para saltar también las púas inferiores.",
+            "No te precipites: el péndulo tiene prioridad de impacto si cruzas mientras barre el centro.",
+        ],
+    },
+    {
+        "id": "rueda_hierro",
+        "categoria": "Trampas",
+        "nombre": "Rueda de Hierro",
+        "subtitulo": "Rodillo pesado que recorre un carril",
+        "icono": "rueda",
+        "color": ROJO,
+        "descripcion": (
+            "Enorme rueda dentada dormida al fondo de un carril marcado en la piedra. "
+            "Al pisar la casilla activadora se libera y rueda a gran velocidad por todo el tramo "
+            "hasta encajarse en el extremo opuesto."
+        ),
+        "consejos": [
+            "Identifica las marcas del carril en el suelo y ubica la casilla de refugio dorada a un costado.",
+            "Al activarla, sal del carril hacia el refugio lateral antes de que el rodillo te alcance.",
+            "Cuando la rueda queda encajada al final del recorrido, el pasillo vuelve a ser seguro.",
+        ],
+    },
+    {
+        "id": "puas",
+        "categoria": "Trampas",
+        "nombre": "Púas del Corredor",
+        "subtitulo": "Hilera de cuchillas fijas a ras de suelo",
+        "icono": "puas",
+        "color": (214, 146, 84),
+        "descripcion": (
+            "Trampa clásica de hojas metálicas que emergen de la baldosa en pasillos secundarios. "
+            "Cualquier viajero que camine sobre ellas a pie firme será alcanzado por las hojas."
+        ),
+        "consejos": [
+            "Pulsa la barra Espaciadora justo antes de entrar en la casilla para saltar por encima.",
+            "El salto dura 0.62 segundos: suficiente para cruzar la casilla de púas de un solo impulso.",
+            "Si sobre las púas también oscila un péndulo, sincroniza el salto con la cadena verde.",
+        ],
+    },
+    # --- CATEGORÍA: ENTIDADES (Orbe Carmesí, Eco, Esqueletos, Espectros) ---
+    {
+        "id": "orbe_carmesi",
+        "categoria": "Entidades",
+        "nombre": "Orbe Carmesí (Radar)",
+        "subtitulo": "Rastreador BFS que drena 5 movimientos",
+        "icono": "radar",
+        "color": ROJO,
+        "descripcion": (
+            "Punto carmesí latente que nace lejos de la ruta principal. Tras unos turnos de espera, "
+            "despierta y calcula en cada avance el camino más corto hacia ti mediante búsqueda BFS "
+            "(Cola). Si te alcanza no te mata, pero drena 5 movimientos y regresa dormido a su origen."
+        ),
+        "consejos": [
+            "No te quedes quieto ni des vueltas innecesarias: el Orbe Carmesí recorta camino con BFS.",
+            "Vigila en el HUD el indicador 'radar a X pasos' o 'radar dormido' para medir el riesgo.",
+            "Si el impacto es inevitable, procura que te toque teniendo margen de movimientos.",
+        ],
+    },
+    {
+        "id": "eco",
+        "categoria": "Entidades",
+        "nombre": "El Eco (Sombra)",
+        "subtitulo": "Reflejo espectral que reproduce tus pasos previos",
+        "icono": "eco",
+        "color": CIAN,
+        "descripcion": (
+            "Silueta translúcida de luz azulada nacida en la entrada del laberinto. "
+            "Guarda cada casilla que pisas en una estructura de Cola (FIFO) y, tras unos pasos "
+            "de ventaja, desencola y repite exactamente tu recorrido turno tras turno."
+        ),
+        "consejos": [
+            "Evita esperar turnos con Q o retroceder sobre tus propios pasos sin planificar.",
+            "El habilidad 'Velo contra el Eco' amplía los pasos de gracia antes de que comience a seguirte.",
+            "Mantén un avance constante hacia la salida: mientras no te detengas, conservarás tu ventaja.",
+        ],
+    },
+    {
+        "id": "esqueletos",
+        "categoria": "Entidades",
+        "nombre": "Esqueletos",
+        "subtitulo": "Centinelas óseos vulnerables a tus armas",
+        "icono": "esqueleto",
+        "color": VERDE,
+        "descripcion": (
+            "Antiguos guardianes caídos con una brasa verdosa en el pecho que bloquean corredores "
+            "y ramales. No puedes atravesar su casilla mientras sigan en pie, pero caen abatidos "
+            "ante el filo o la magia de tu arma equipada."
+        ),
+        "consejos": [
+            "Colócate en la casilla adyacente mirando hacia el esqueleto y pulsa F o X para atacar.",
+            "Equipa distintas armas en el Inventario [I] para variar el estilo visual de tu ataque.",
+            "Abatirlos despeja atajos valiosos hacia cofres, estrellas y fragmentos de mapa.",
+        ],
+    },
+    {
+        "id": "espectros",
+        "categoria": "Entidades",
+        "nombre": "Espectros del Umbral",
+        "subtitulo": "Patrullas en Lista Circular y persecución",
+        "icono": "espectro",
+        "color": MORADO,
+        "descripcion": (
+            "Sombras encapuchadas de ojos encendidos que recorren una ruta cerrada almacenada "
+            "en una Lista Circular. Si entras en su radio de visión te detectan y pasan a "
+            "estado de persecución activa."
+        ),
+        "consejos": [
+            "Observa su ciclo de patrulla antes de cruzar un pasillo vigilado.",
+            "El 'Manto de Bruma' reduce el radio en que los espectros pueden detectarte.",
+            "Los espectros nunca patrullan de forma fija la ruta óptima inicial: usa la pista [H] si dudas.",
+        ],
+    },
+    # --- CATEGORÍA: COLECCIONABLES ---
+    {
+        "id": "estrellas",
+        "categoria": "Coleccionables",
+        "nombre": "Estrellas Astrales",
+        "subtitulo": "Gemas de luz que otorgan +150 puntos",
+        "icono": "estrella",
+        "color": ORO,
+        "descripcion": (
+            "Cristales dorados suspendidos en los ramales del laberinto. Emiten un suave halo "
+            "en la oscuridad, suman +150 puntos al marcador final y determinan la calificación "
+            "de hasta 3 estrellas al cruzar la puerta."
+        ),
+        "consejos": [
+            "Busca su resplandor dorado incluso a través de la penumbra de la linterna.",
+            "Evalúa si tus movimientos restantes te permiten desviarte por una estrella y volver a la ruta.",
+            "La 'Coraza del Guardián' (+5 mov.) facilita recolectar las 3 estrellas sin agotar pasos.",
+        ],
+    },
+    {
+        "id": "cofres",
+        "categoria": "Coleccionables",
+        "nombre": "Cofres del Tesoro",
+        "subtitulo": "Arcas con reliquias del Códice Oculto u oro",
+        "icono": "cofre",
+        "color": ORO,
+        "descripcion": (
+            "Cofres de madera noble y herrajes de bronce ocultos fuera del camino principal. "
+            "Al pisar su casilla se abren automáticamente y desbloquean nuevas Armas, Armaduras "
+            "o Habilidades Pasivas para tu inventario, o bien bolsas de +50 de oro."
+        ),
+        "consejos": [
+            "La habilidad 'Ojo del Zahorí' orienta hacia el cofre cerrado más cercano.",
+            "Revisa tu botín pulsando [I] para equipar de inmediato cualquier reliquia recién descubierta.",
+        ],
+    },
+    {
+        "id": "fragmentos",
+        "categoria": "Coleccionables",
+        "nombre": "Fragmentos de Mapa",
+        "subtitulo": "Reliquias de cartografía para trueque con Tizón",
+        "icono": "reliquia",
+        "color": CIAN,
+        "descripcion": (
+            "Pergaminos antiguos resguardados al fondo de los ramales con Placas de Tiza. "
+            "Solo pueden tomarse después de activar y desarmar con éxito la placa de presión."
+        ),
+        "consejos": [
+            "Supera la prueba de la Placa de Tiza volviendo a la marca en menos de 2.0 s para liberarlo.",
+            "En el Campamento, habla con el duende Tizón y pulsa E para cambiar cada fragmento por 1 Pista gratis.",
+        ],
+    },
+]
+
+
+class PantallaCodiceGuia(Pantalla):
+    """
+    Guía y enciclopedia interactiva de mecánicas, trampas, entidades y coleccionables del laberinto.
+    - Panel izquierdo: lista organizada por categorías (Trampas, Entidades, Coleccionables).
+    - Panel derecho: ficha ilustrada con vista previa animada, descripción y consejos tácticos.
+    - Navegación con mouse, hover, flechas/WASD, y retorno limpio con Esc, C o botón Volver.
+    """
+
+    CATEGORIAS = ("Trampas", "Entidades", "Coleccionables")
+
+    def __init__(self, app, volver=None):
+        super().__init__(app)
+        self.volver = volver or (lambda: Campamento(app))
+        self.entradas = [dict(e) for e in ENTRADAS_CODICE_GUIA]
+        self.categorias = list(self.CATEGORIAS)
+        self.indice_sel = 0
+        self.sel = 0
+        self.panel_izquierdo = pygame.Rect(36, 98, 410, 536)
+        self.panel_derecho = pygame.Rect(464, 98, 600, 536)
+        self.filas = []               # lista de (pygame.Rect, indice_entrada)
+        self.cabeceras_cat = []       # lista de (pygame.Rect, nombre_categoria, primer_indice)
+        self._construir_lista()
+        self.b_volver = Boton("Volver", (ANCHO // 2 - 110, 648, 220, 48), self.salir,
+                              "Esc", ORO, 21)
+        self.boton = self.b_volver
+
+    def _construir_lista(self):
+        """Calcula los rectángulos interactivos del panel izquierdo agrupados por categoría."""
+        self.filas = []
+        self.cabeceras_cat = []
+        x = self.panel_izquierdo.x + 18
+        w = self.panel_izquierdo.w - 36
+        y = self.panel_izquierdo.y + 46
+
+        for cat in self.CATEGORIAS:
+            primer_idx = next(
+                (i for i, e in enumerate(self.entradas) if e["categoria"] == cat), 0
+            )
+            rect_cat = pygame.Rect(x, y, w, 22)
+            self.cabeceras_cat.append((rect_cat, cat, primer_idx))
+            y += 24
+            for idx, entrada in enumerate(self.entradas):
+                if entrada["categoria"] != cat:
+                    continue
+                rect_fila = pygame.Rect(x, y, w, 29)
+                self.filas.append((rect_fila, idx))
+                y += 32
+            y += 4
+
+    def _seleccionar(self, indice, sonar=True):
+        """Cambia la entrada activa manteniendo sincronizados `indice_sel` y `sel`."""
+        if not self.entradas:
+            return
+        nuevo = indice % len(self.entradas)
+        cambio = nuevo != self.indice_sel
+        self.indice_sel = nuevo
+        self.sel = nuevo
+        if cambio and sonar and hasattr(self.app, "sonidos"):
+            self.app.sonidos.reproducir("hover")
+
+    def _cambiar_categoria(self, delta):
+        """Salta al primer elemento de la categoría anterior o siguiente."""
+        if not self.entradas:
+            return
+        cat_actual = self.entradas[self.indice_sel]["categoria"]
+        try:
+            idx_cat = self.CATEGORIAS.index(cat_actual)
+        except ValueError:
+            idx_cat = 0
+        nueva_cat = self.CATEGORIAS[(idx_cat + delta) % len(self.CATEGORIAS)]
+        for i, entrada in enumerate(self.entradas):
+            if entrada["categoria"] == nueva_cat:
+                self._seleccionar(i, sonar=True)
+                break
+
+    def entrada_actual(self):
+        """Devuelve el diccionario de la entrada actualmente seleccionada."""
+        if not self.entradas:
+            return None
+        return self.entradas[self.indice_sel]
+
+    def salir(self):
+        """Regresa limpiamente a la pantalla previa sin perder el estado de la partida."""
+        destino = self.volver() if callable(self.volver) else self.volver
+        if destino is not None:
+            self.app.ir_a(destino)
+
+    def evento(self, e):
+        """Procesa clics de mouse, movimiento de hover y teclas de navegación (WASD/Flechas/Esc/C)."""
+        if self._clics(e, [self.b_volver]):
+            return
+        if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+            for rect_fila, idx in self.filas:
+                if rect_fila.collidepoint(e.pos):
+                    self._seleccionar(idx, sonar=False)
+                    self.app.sonidos.reproducir("clic")
+                    return
+            for rect_cat, _, primer_idx in self.cabeceras_cat:
+                if rect_cat.collidepoint(e.pos):
+                    self._seleccionar(primer_idx, sonar=False)
+                    self.app.sonidos.reproducir("clic")
+                    return
+        elif e.type == pygame.MOUSEMOTION:
+            for rect_fila, idx in self.filas:
+                if rect_fila.collidepoint(e.pos):
+                    self._seleccionar(idx, sonar=True)
+                    break
+        elif e.type == pygame.KEYDOWN:
+            if e.key in (pygame.K_ESCAPE, pygame.K_c, pygame.K_BACKSPACE):
+                self.app.sonidos.reproducir("clic")
+                self.salir()
+            elif e.key in (pygame.K_UP, pygame.K_w):
+                self._seleccionar(self.indice_sel - 1, sonar=True)
+            elif e.key in (pygame.K_DOWN, pygame.K_s):
+                self._seleccionar(self.indice_sel + 1, sonar=True)
+            elif e.key in (pygame.K_LEFT, pygame.K_a):
+                self._cambiar_categoria(-1)
+            elif e.key in (pygame.K_RIGHT, pygame.K_d):
+                self._cambiar_categoria(1)
+
+    def actualizar(self, dt):
+        """Avanza las animaciones de las ilustraciones y verifica hover del mouse."""
+        super().actualizar(dt)
+        mouse = pygame.mouse.get_pos()
+        self.b_volver.actualizar(dt, mouse)
+        for rect_fila, idx in self.filas:
+            if rect_fila.collidepoint(mouse):
+                self._seleccionar(idx, sonar=True)
+                break
+
+    def _dibujar_ilustracion(self, surf, rect, tipo_icono, escala=64):
+        """Dibuja el elemento del laberinto en vivo dentro de `rect` usando `interfaz.render`."""
+        cx, cy = rect.centerx, rect.centery
+        cell = max(18, int(escala))
+        if tipo_icono == "placa_tiza":
+            estado_demo = "activa" if int(self.t * 0.8) % 2 == 1 else "armada"
+            retorno_pos = (cx - int(cell * 0.55), cy + int(cell * 0.32)) if cell >= 36 else None
+            dibujar_trampa(surf, cx, cy, cell, self.t, estado_demo, retorno_pos)
+        elif tipo_icono == "rotor":
+            segura = rotor_seguro(self.t, 0.0)
+            dibujar_trampa_giratoria(surf, cx, cy, cell, self.t, segura=segura, fase=0.0)
+        elif tipo_icono == "pendulo":
+            segura = cadena_segura(self.t, 0.0)
+            dibujar_puas(surf, cx, cy + int(cell * 0.12), int(cell * 0.82), self.t, activas=True)
+            dibujar_cadena(surf, cx, cy, cell, self.t, fase=0.0, segura=segura)
+        elif tipo_icono == "rueda":
+            dibujar_rueda(surf, cx, cy, cell, self.t)
+        elif tipo_icono == "puas":
+            dibujar_puas(surf, cx, cy, cell, self.t, activas=True)
+        elif tipo_icono == "radar":
+            dibujar_radar(surf, cx, cy, cell, self.t)
+        elif tipo_icono == "eco":
+            dibujar_eco(surf, cx, cy, cell, self.t)
+        elif tipo_icono == "esqueleto":
+            dibujar_esqueleto(surf, cx, cy, cell, self.t)
+        elif tipo_icono == "espectro":
+            dibujar_enemigo(surf, cx, cy, cell, self.t, (math.cos(self.t * 2), math.sin(self.t * 2)))
+        elif tipo_icono == "estrella":
+            dibujar_estrella(surf, cx, cy, cell, self.t)
+        elif tipo_icono == "cofre":
+            abierto_demo = int(self.t * 0.7) % 2 == 1
+            dibujar_cofre(surf, cx, cy, cell, self.t, abierto=abierto_demo)
+        elif tipo_icono == "reliquia":
+            dibujar_reliquia(surf, cx, cy, cell, self.t)
+
+    def dibujar(self, surf):
+        """Pinta los dos paneles interactivos del Códice de Mecánicas del Laberinto."""
+        self.app.fondo.dibujar(surf, self.t)
+
+        # Cabecera principal
+        texto(surf, "CÓDICE DEL LABERINTO", 38, ORO, (ANCHO // 2, 22), "midtop", negrita=True)
+        texto(
+            surf,
+            "Enciclopedia táctica de trampas, entidades espectrales y coleccionables  ·  [↑/↓ o W/S] Elegir  ·  [←/→ o A/D] Categoría",
+            14,
+            APAGADO,
+            (ANCHO // 2, 68),
+            "midtop",
+            sombra=False,
+        )
+
+        # -----------------------------------------------------------------
+        # 1. PANEL IZQUIERDO: Categorías y lista interactiva de elementos
+        # -----------------------------------------------------------------
+        p_izq = self.panel_izquierdo
+        panel(surf, p_izq, 232, mezclar(BORDE, CIAN, 0.38))
+        remaches(surf, p_izq, BORDE, 8)
+        texto(surf, "ÍNDICE DE ELEMENTOS", 18, CIAN, (p_izq.x + 20, p_izq.y + 14), negrita=True)
+        texto(
+            surf,
+            "%d / %d" % (self.indice_sel + 1, len(self.entradas)),
+            13,
+            ORO,
+            (p_izq.right - 20, p_izq.y + 18),
+            "topright",
+            negrita=True,
+            sombra=False,
+        )
+        separador(surf, p_izq.x + 16, p_izq.right - 16, p_izq.y + 40, BORDE)
+
+        colores_cat = {
+            "Trampas": ROJO,
+            "Entidades": CIAN,
+            "Coleccionables": ORO,
+        }
+        for rect_cat, nombre_cat, _ in self.cabeceras_cat:
+            col_c = colores_cat.get(nombre_cat, ORO)
+            texto(surf, nombre_cat.upper(), 12, col_c, (rect_cat.x + 4, rect_cat.y + 3),
+                  negrita=True, sombra=False)
+            pygame.draw.line(
+                surf,
+                mezclar(BORDE, col_c, 0.5),
+                (rect_cat.x + 4, rect_cat.bottom - 2),
+                (rect_cat.right - 4, rect_cat.bottom - 2),
+                1,
+            )
+
+        for rect_fila, idx in self.filas:
+            entrada = self.entradas[idx]
+            activo = idx == self.indice_sel
+            col_e = entrada.get("color", ORO)
+            fondo_fila = mezclar((24, 26, 20), col_e, 0.24 if activo else 0.06)
+            borde_fila = col_e if activo else (64, 60, 44)
+            pygame.draw.rect(surf, fondo_fila, rect_fila, border_radius=5)
+            pygame.draw.rect(surf, borde_fila, rect_fila, 2 if activo else 1, border_radius=5)
+            if activo:
+                pygame.draw.rect(
+                    surf, col_e, (rect_fila.x + 4, rect_fila.y + 5, 4, rect_fila.h - 10), border_radius=2
+                )
+            mini_rect = pygame.Rect(rect_fila.x + 12, rect_fila.y + 2, 24, rect_fila.h - 4)
+            self._dibujar_ilustracion(surf, mini_rect, entrada["icono"], escala=20)
+            texto_ajustado(
+                surf,
+                entrada["nombre"],
+                15,
+                TEXTO if activo else (204, 198, 176),
+                (rect_fila.x + 44, rect_fila.centery),
+                rect_fila.w - 66,
+                "midleft",
+                negrita=activo,
+            )
+            if activo:
+                texto(surf, "▸", 15, col_e, (rect_fila.right - 12, rect_fila.centery),
+                      "center", negrita=True, sombra=False)
+
+        # -----------------------------------------------------------------
+        # 2. PANEL DERECHO: Ficha ilustrada con descripción y táctica
+        # -----------------------------------------------------------------
+        p_der = self.panel_derecho
+        actual = self.entrada_actual()
+        col_acento = actual.get("color", ORO) if actual else ORO
+        panel(surf, p_der, 234, mezclar(BORDE, col_acento, 0.48))
+        remaches(surf, p_der, BORDE, 8)
+
+        if actual is not None:
+            # Cabecera de la ficha e ilustración animada en vivo
+            marco_ilu = pygame.Rect(p_der.x + 24, p_der.y + 22, 128, 128)
+            pygame.draw.rect(surf, (14, 16, 12), marco_ilu, border_radius=8)
+            brillo(surf, marco_ilu.center, 66, col_acento, 0.20 + 0.05 * math.sin(self.t * 3.2))
+            self._dibujar_ilustracion(surf, marco_ilu, actual["icono"], escala=68)
+            pygame.draw.rect(surf, col_acento, marco_ilu, 2, border_radius=8)
+
+            tx_ficha = marco_ilu.right + 20
+            ancho_enc = p_der.right - tx_ficha - 24
+            insignia_cat = pygame.Rect(tx_ficha, p_der.y + 24, 150, 24)
+            pygame.draw.rect(surf, mezclar((22, 24, 18), col_acento, 0.25), insignia_cat, border_radius=4)
+            pygame.draw.rect(surf, col_acento, insignia_cat, 1, border_radius=4)
+            texto(
+                surf,
+                actual["categoria"].upper(),
+                12,
+                col_acento,
+                insignia_cat.center,
+                "center",
+                negrita=True,
+                sombra=False,
+            )
+
+            texto_ajustado(
+                surf,
+                actual["nombre"],
+                28,
+                TEXTO,
+                (tx_ficha, p_der.y + 56),
+                ancho_enc,
+                negrita=True,
+            )
+            texto_ajustado(
+                surf,
+                actual.get("subtitulo", ""),
+                15,
+                ORO,
+                (tx_ficha, p_der.y + 96),
+                ancho_enc,
+                negrita=True,
+            )
+
+            y_sec = marco_ilu.bottom + 18
+            separador(surf, p_der.x + 24, p_der.right - 24, y_sec, BORDE)
+
+            # Sección 1: Qué es y qué hace
+            y_sec += 14
+            texto(surf, "QUÉ ES Y QUÉ HACE", 15, col_acento, (p_der.x + 26, y_sec),
+                  negrita=True, sombra=False)
+            y_sec = PantallaInventario._dibujar_parrafo(
+                surf,
+                actual["descripcion"],
+                15,
+                (p_der.x + 26, y_sec + 24),
+                p_der.w - 52,
+                TEXTO,
+            )
+
+            y_sec += 8
+            separador(surf, p_der.x + 24, p_der.right - 24, y_sec, BORDE)
+
+            # Sección 2: Consejos tácticos
+            y_sec += 14
+            texto(surf, "CONSEJOS TÁCTICOS", 15, ORO, (p_der.x + 26, y_sec),
+                  negrita=True, sombra=False)
+            y_sec += 24
+            for consejo in actual.get("consejos", []):
+                pygame.draw.circle(surf, col_acento, (p_der.x + 34, y_sec + 9), 4)
+                y_sec = PantallaInventario._dibujar_parrafo(
+                    surf,
+                    consejo,
+                    14,
+                    (p_der.x + 48, y_sec),
+                    p_der.w - 74,
+                    (214, 218, 198),
+                )
+                y_sec += 2
+
+        self.b_volver.dibujar(surf)
+
 
