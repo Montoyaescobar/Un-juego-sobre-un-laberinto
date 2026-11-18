@@ -121,8 +121,8 @@ class PantallaCodiceGuia(Pantalla):
 ├── WAVE 1 (Completada y Fusionada en Master):
 │   ├── [COMPLETADO] [Agent-Weapon-Visuals] Efectos de Ataque y Sprites Dinámicos por Arma (render.py)
 │   └── [COMPLETADO] [Agent-Codex-Guide] Pantalla del Códice de Mecánicas y Botón en HUD (pantallas.py)
-└── WAVE 2 (Lista para Ejecución):
-    └── [EN PROCESO] [Agent-QA-CodexWeapon] Banco de Pruebas de Armas y Códice del Laberinto (test_codice_arma.py)
+└── WAVE 2 (Completada y Fusionada en Master):
+    └── [COMPLETADO] [Agent-QA-CodexWeapon] Banco de Pruebas de Armas y Códice del Laberinto (test_codice_arma.py)
 ```
 
 ---
