@@ -193,9 +193,9 @@ def dibujar_portal(surf, cx, cy, cell, t):
 _sprites_jugador = {}
 
 
-def _sprite_jugador(direccion, paso, antorcha, saltando):
+def _sprite_jugador(direccion, paso, antorcha, saltando, arma="espada_ceniza"):
     """Construye y guarda un fotograma de 18 × 24 píxeles del viajero."""
-    clave = (direccion, paso, antorcha, saltando)
+    clave = (direccion, paso, antorcha, saltando, arma)
     if clave in _sprites_jugador:
         return _sprites_jugador[clave]
     espejo = direccion == "derecha"
@@ -261,9 +261,18 @@ def _sprite_jugador(direccion, paso, antorcha, saltando):
             pygame.draw.line(s, cuero, (13, 12), (16, 8), 2)
             pygame.draw.rect(s, (160, 105, 49), (15, 5, 3, 4))
     lado_espada = 14 if vista == "izquierda" else 2
-    pygame.draw.line(s, (40, 65, 46), (lado_espada, 13), (lado_espada - 2, 18), 2)
-    pygame.draw.line(s, (122, 183, 113), (lado_espada, 13), (lado_espada - 2, 18), 1)
-    pygame.draw.rect(s, (151, 111, 63), (lado_espada - 1, 12, 3, 2))
+    if arma == "daga_sombras":
+        pygame.draw.line(s, (36, 18, 52), (lado_espada, 13), (lado_espada - 2, 18), 2)
+        pygame.draw.line(s, (180, 70, 240), (lado_espada, 13), (lado_espada - 2, 18), 1)
+        pygame.draw.rect(s, (70, 50, 90), (lado_espada - 1, 12, 3, 2))
+    elif arma == "baston_centella":
+        pygame.draw.line(s, (86, 56, 34), (lado_espada, 11), (lado_espada - 1, 21), 1)
+        pygame.draw.rect(s, (100, 230, 255), (lado_espada - 1, 9, 3, 3))
+        pygame.draw.rect(s, (225, 250, 255), (lado_espada, 10, 1, 1))
+    else:
+        pygame.draw.line(s, (40, 65, 46), (lado_espada, 13), (lado_espada - 2, 18), 2)
+        pygame.draw.line(s, (122, 183, 113), (lado_espada, 13), (lado_espada - 2, 18), 1)
+        pygame.draw.rect(s, (151, 111, 63), (lado_espada - 1, 12, 3, 2))
     if espejo:
         s = pygame.transform.flip(s, True, False)
     _sprites_jugador[clave] = s
@@ -271,10 +280,10 @@ def _sprite_jugador(direccion, paso, antorcha, saltando):
 
 
 def dibujar_jugador(surf, cx, cy, cell, t, antorcha=True, direccion="abajo",
-                    andando=False, saltando=False):
+                    andando=False, saltando=False, arma="espada_ceniza"):
     """Dibuja al viajero en pixel art con marcha, respiración, salto y llama animada."""
     paso = 2 if saltando else int(t * 9) % 2 if andando else 2 + int((t % 1.6) > 0.8)
-    sprite = _sprite_jugador(direccion, paso, antorcha, saltando)
+    sprite = _sprite_jugador(direccion, paso, antorcha, saltando, arma)
     ancho, alto = max(12, int(cell * 0.74)), max(18, int(cell * 0.94))
     sprite = pygame.transform.scale(sprite, (ancho, alto))
     balanceo = int(math.sin(t * 12) * 1.4) if andando else int(math.sin(t * 2.2) * 0.7)
@@ -600,11 +609,73 @@ def dibujar_esqueleto(surf, cx, cy, cell, t, fase=0.0):
 
 
 def dibujar_espada_verde(surf, cx, cy, cell, t, direccion, progreso):
-    """Corte de espada pixelada que deja una estela de fuego verde espectral."""
+    """Retrocompatibilidad: tajo de la espada de ceniza."""
+    dibujar_ataque_arma(surf, cx, cy, cell, t, direccion, progreso, arma_id="espada_ceniza")
+
+
+def _ataque_daga(surf, cx, cy, cell, t, dx, dy, px, py, progreso):
+    """Tajo ágil y curvo de estela umbría con niebla nocturna."""
+    morado = (180, 70, 240)
+    p = max(0.0, min(1.0, progreso))
+    alpha = max(0.0, 1.0 - p * 0.5)
+    puntos = []
+    for i in range(9):
+        k = i / 8
+        ang = (k - 0.5) * 2.2 + (p - 0.5) * 0.8
+        fwd = cell * (0.25 + 0.42 * math.cos(ang))
+        lat = cell * 0.5 * math.sin(ang)
+        puntos.append((int(cx + dx * fwd + px * lat), int(cy + dy * fwd + py * lat)))
+    brillo(surf, puntos[len(puntos) // 2], max(5, int(cell * 0.6)), (60, 20, 100), 0.42 * alpha)
+    brillo(surf, puntos[-1], max(4, int(cell * 0.35)), morado, 0.45 * alpha)
+    pygame.draw.lines(surf, (50, 18, 80), False, puntos, max(4, cell // 7))
+    pygame.draw.lines(surf, morado, False, puntos, max(2, cell // 14))
+    pygame.draw.lines(surf, (235, 190, 255), False, puntos[3:], max(1, cell // 34))
+    for i in range(4):
+        nx = cx + dx * cell * (0.2 + i * 0.16) + px * math.sin(t * 7 + i * 1.7) * cell * 0.25
+        ny = cy + dy * cell * (0.2 + i * 0.16) + py * math.sin(t * 7 + i * 1.7) * cell * 0.25
+        brillo(surf, (nx, ny), max(3, int(cell * 0.22)), (40, 14, 70), 0.30 * alpha)
+
+
+def _ataque_baston(surf, cx, cy, cell, t, dx, dy, px, py, progreso):
+    """Destello y haz frontal de centellas eléctricas."""
+    cian = (100, 230, 255)
+    p = max(0.0, min(1.0, progreso))
+    alpha = max(0.0, 1.0 - p * 0.45)
+    ini = (cx + dx * cell * 0.15, cy + dy * cell * 0.15)
+    fin = (cx + dx * cell * 0.85, cy + dy * cell * 0.85)
+    brillo(surf, ini, max(5, int(cell * 0.45)), cian, 0.5 * alpha)
+    brillo(surf, fin, max(5, int(cell * 0.4)), cian, 0.35 * alpha)
+    for rayo in range(2):
+        pts = [(int(ini[0]), int(ini[1]))]
+        for i in range(1, 7):
+            k = i / 6
+            off = math.sin(t * 40 + i * 2.3 + rayo * 3.1) * cell * 0.12 * (1 if i < 6 else 0)
+            pts.append((int(ini[0] + (fin[0] - ini[0]) * k + px * off),
+                        int(ini[1] + (fin[1] - ini[1]) * k + py * off)))
+        pygame.draw.lines(surf, (30, 100, 140), False, pts, max(3, cell // 10) if rayo == 0 else 2)
+        pygame.draw.lines(surf, cian if rayo == 0 else (225, 250, 255), False, pts,
+                          max(1, cell // 22))
+    oro = (255, 215, 90)
+    for i in range(5):
+        k = 0.25 + 0.15 * i
+        salt = math.sin(t * 23 + i * 1.9) * cell * 0.22
+        x = cx + dx * cell * k + px * salt
+        y = cy + dy * cell * k + py * salt
+        pygame.draw.rect(surf, oro, (int(x), int(y), max(2, cell // 18), max(2, cell // 18)))
+
+
+def dibujar_ataque_arma(surf, cx, cy, cell, t, direccion, progreso, arma_id="espada_ceniza"):
+    """Dibuja el ataque del arma equipada (espada_ceniza, daga_sombras, baston_centella)."""
     vectores = {"arriba": (0, -1), "abajo": (0, 1),
                 "izquierda": (-1, 0), "derecha": (1, 0)}
     dx, dy = vectores.get(direccion, (0, 1))
     px, py = -dy, dx
+    if arma_id == "daga_sombras":
+        _ataque_daga(surf, cx, cy, cell, t, dx, dy, px, py, progreso)
+        return
+    if arma_id == "baston_centella":
+        _ataque_baston(surf, cx, cy, cell, t, dx, dy, px, py, progreso)
+        return
     barrido = math.cos(max(0.0, min(1.0, progreso)) * math.pi) * 0.28
     hilt = (int(cx + dx * cell * 0.08 - px * cell * 0.10),
             int(cy + dy * cell * 0.08 - py * cell * 0.10))
